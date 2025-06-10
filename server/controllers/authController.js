@@ -37,33 +37,6 @@ export const signup = async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 };
-export const login = async (req, res) => {
-  const { email, password } = req.body;
-  try {
-    if (!email || !password) {
-      return res.status(400).json({ message: "All fields are required" });
-    }
-
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ message: "Invalid credentials" });
-    }
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: "Invalid credentials" });
-    }
-    generateToken(user._id, res);
-    res.status(200).json({
-      _id: user._id,
-      fullName: user.fullName,
-      email: user.email,
-      profilePic: user.profilePic,
-    });
-  } catch (error) {
-    console.log("error in login", error.message);
-    res.status(500).json({ error: "Internal server error" });
-  }
-};
 export const logout = (req, res) => {
   try {
     res.cookie("token", "", {
@@ -76,7 +49,6 @@ export const logout = (req, res) => {
   }
 };
 
-
 export const checkAuth = (req, res) => {
   try {
     res.status(200).json(req.user);
@@ -85,3 +57,61 @@ export const checkAuth = (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 } 
+// Add this debug version to your authController.js login function
+// Replace your login function in authController.js
+export const login = async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    console.log('🔐 === LOGIN ATTEMPT DEBUG ===');
+    console.log('📧 Email:', email);
+    console.log('🌐 Origin:', req.headers.origin);
+    console.log('🔧 Method:', req.method);
+    console.log('📋 Headers:', JSON.stringify(req.headers, null, 2));
+    
+    if (!email || !password) {
+      console.log('❌ Missing email or password');
+      return res.status(400).json({ message: "All fields are required" });
+    }
+
+    console.log('🔍 Looking for user in database...');
+    const user = await User.findOne({ email });
+    if (!user) {
+      console.log('❌ User not found');
+      return res.status(400).json({ message: "Invalid credentials" });
+    }
+    
+    console.log('👤 User found:', user.email);
+    
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      console.log('❌ Password mismatch');
+      return res.status(400).json({ message: "Invalid credentials" });
+    }
+
+    console.log('✅ Password matches, generating token...');
+    
+    // Generate token and set cookie
+    const token = generateToken(user._id, res);
+    
+    console.log('🎫 Token generation completed');
+    
+    const responseData = {
+      _id: user._id,
+      fullName: user.fullName,
+      email: user.email,
+      profilePic: user.profilePic,
+    };
+    
+    console.log('📤 Sending response data:', responseData);
+    console.log('🍪 Final response headers:', res.getHeaders());
+    
+    res.status(200).json(responseData);
+    
+    console.log('✅ Login response sent successfully');
+    
+  } catch (error) {
+    console.log("❌ Error in login:", error.message);
+    console.log("❌ Full error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
