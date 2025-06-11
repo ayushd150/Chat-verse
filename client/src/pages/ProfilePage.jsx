@@ -83,20 +83,6 @@ const ProfilePage = () => {
                 {authUser?.email}
               </p>
             </div>
-            <div className="spcae-y-1.5">
-              <div className="flex items-center justify-between w-full">
-                <p className="text-sm font-semibold text-zinc-400 flex items-center gap-2">
-                  {" "}
-                  Typing Visibility
-                </p>
-                <input
-                  type="checkbox"
-                  className="toggle"
-                  defaultChecked={authUser?.showTypingMessage}
-                  onChange={handlePrefrence}
-                />
-              </div>
-            </div>
           </div>
 
           <div className="mt-6 bg-base-300 rounded-xl p-6">
