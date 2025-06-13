@@ -55,26 +55,30 @@ checkAuth: async () => {
 
   // Signup
   signup: async (data) => {
-    set({ isSigningUp: true });
-    try {
-      console.log('📝 Signing up...');
-      const res = await axiosInstance.post('/auth/signup', data);
-      console.log('✅ Signup successful:', res.data);
-      console.log('🍪 Cookies after signup:', document.cookie);
-      
-      set({ authUser: res.data, isSigningUp: false });
-      toast.success('Account created successfully');
-      get().connectSocket();
-      
-      return res.data;
-    } catch (error) {
-      console.log('❌ Signup failed:', error.response?.data);
-      const errorMessage = error.response?.data?.error || error.response?.data?.message || 'Signup failed';
-      toast.error(errorMessage);
-      set({ isSigningUp: false });
-      throw error;
-    }
-  },
+  set({ isSigningUp: true });
+  try {
+    console.log('📝 Signing up...');
+    const res = await axiosInstance.post('/auth/signup', data);
+    console.log('✅ Signup successful:', res.data);
+    
+    // DON'T set authUser here - user should login separately
+    // set({ authUser: res.data, isSigningUp: false }); // REMOVE THIS LINE
+    set({ isSigningUp: false }); // Only set loading to false
+    
+    toast.success('Account created successfully! Please login with your credentials.');
+    
+    // DON'T connect socket here - user is not authenticated yet
+    // get().connectSocket(); // REMOVE THIS LINE
+    
+    return res.data;
+  } catch (error) {
+    console.log('❌ Signup failed:', error.response?.data);
+    const errorMessage = error.response?.data?.error || error.response?.data?.message || 'Signup failed';
+    toast.error(errorMessage);
+    set({ isSigningUp: false });
+    throw error;
+  }
+},
 
   // Login
   login: async (data) => {

@@ -36,44 +36,87 @@ export const updateTypingStatus = async (req, res) => {
 
 export const updateProfile = async (req, res) => {
   try {
-    const { profilePic } = req.body;
+    const { profilePic, fullName, email } = req.body;
     const userId = req.user._id;
 
     console.log("🔄 Profile update request:", {
       userId,
       hasProfilePic: !!profilePic,
+      hasFullName: !!fullName,
+      hasEmail: !!email,
       profilePicLength: profilePic?.length || 0
     });
 
-    if (!profilePic) {
-      return res.status(400).json({ message: "Profile picture is required" });
+    // Check if at least one field is provided
+    if (!profilePic && !fullName && !email) {
+      return res.status(400).json({ message: "At least one field is required to update" });
     }
 
-    // Validate base64 image format
-    if (!profilePic.startsWith('data:image/')) {
-      return res.status(400).json({ message: "Invalid image format" });
+    // Build update object
+    const updateData = {};
+
+    // Handle profile picture update
+    if (profilePic) {
+      // Validate base64 image format
+      if (!profilePic.startsWith('data:image/')) {
+        return res.status(400).json({ message: "Invalid image format" });
+      }
+
+      console.log("☁️ Uploading to Cloudinary...");
+      
+      // Upload to Cloudinary with better error handling
+      const uploadResponse = await cloudinary.uploader.upload(profilePic, {
+        folder: "profile-pictures-chat-app",
+        resource_type: "image",
+        transformation: [
+          { width: 400, height: 400, crop: "fill" }, // Resize to 400x400
+          { quality: "auto:good" } // Optimize quality
+        ]
+      });
+
+      console.log("✅ Cloudinary upload successful:", uploadResponse.secure_url);
+      updateData.profilePic = uploadResponse.secure_url;
     }
 
-    console.log("☁️ Uploading to Cloudinary...");
-    
-    // Upload to Cloudinary with better error handling
-    const uploadResponse = await cloudinary.uploader.upload(profilePic, {
-      folder: "profile-pictures-chat-app",
-      resource_type: "image",
-      transformation: [
-        { width: 400, height: 400, crop: "fill" }, // Resize to 400x400
-        { quality: "auto:good" } // Optimize quality
-      ]
-    });
+    // Handle name update
+    if (fullName !== undefined) {
+      if (!fullName.trim()) {
+        return res.status(400).json({ message: "Full name cannot be empty" });
+      }
+      updateData.fullName = fullName.trim();
+    }
 
-    console.log("✅ Cloudinary upload successful:", uploadResponse.secure_url);
+    // Handle email update
+    if (email !== undefined) {
+      if (!email.trim()) {
+        return res.status(400).json({ message: "Email cannot be empty" });
+      }
+      
+      // Basic email validation
+      const emailRegex = /\S+@\S+\.\S+/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ message: "Please enter a valid email" });
+      }
+
+      // Check if email already exists (excluding current user)
+      const existingUser = await User.findOne({ 
+        email: email.trim(), 
+        _id: { $ne: userId } 
+      });
+      
+      if (existingUser) {
+        return res.status(400).json({ message: "Email already in use" });
+      }
+
+      updateData.email = email.trim();
+    }
+
+    console.log("📝 Updating user with data:", updateData);
 
     // Update user in database
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      {
-        profilePic: uploadResponse.secure_url,
-      },
+      updateData,
       {
         new: true,
         runValidators: true
@@ -97,24 +140,31 @@ export const updateProfile = async (req, res) => {
     // Handle specific Cloudinary errors
     if (error.message.includes('Invalid image file')) {
       return res.status(400).json({ 
-        error: "Invalid image file. Please upload a valid image." 
+        message: "Invalid image file. Please upload a valid image." 
       });
     }
     
     if (error.message.includes('File size too large')) {
       return res.status(400).json({ 
-        error: "Image file is too large. Please upload a smaller image." 
+        message: "Image file is too large. Please upload a smaller image." 
       });
     }
 
     if (error.name === 'ValidationError') {
       return res.status(400).json({ 
-        error: "Validation error: " + error.message 
+        message: "Validation error: " + error.message 
+      });
+    }
+
+    // Handle duplicate key error (email already exists)
+    if (error.code === 11000) {
+      return res.status(400).json({ 
+        message: "Email already in use" 
       });
     }
 
     res.status(500).json({ 
-      error: "Failed to update profile. Please try again." 
+      message: "Failed to update profile. Please try again." 
     });
   }
 };

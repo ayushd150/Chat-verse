@@ -3,6 +3,9 @@ import { useAuthStore } from "../store/useAuthStore";
 import { Link } from "react-router-dom";
 import { Eye, EyeOff, Loader2, Lock, Mail, MessageSquare, User, Sparkles, UserPlus, Shield, Heart } from "lucide-react";
 import toast from "react-hot-toast";
+import { useNavigate } from "react-router-dom";
+
+
 
 const SignUpPage = () => {
   const [showPassword, setShowPassword] = useState(false);
@@ -12,7 +15,7 @@ const SignUpPage = () => {
     password: "",
   });
   const { signup, isSigningUp } = useAuthStore();
-
+  const navigate = useNavigate();
   const validateForm = () => {
     if (!formData.fullName.trim()) {
       toast.error("Full name is required");
@@ -38,12 +41,19 @@ const SignUpPage = () => {
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    const isValid = validateForm();
-    if (isValid) {
+  e.preventDefault();
+  const isValid = validateForm();
+  if (isValid) {
+    try {
       await signup(formData);
+      // Redirect to login page after successful signup
+      navigate('/login');
+    } catch (error) {
+      // Error is already handled in the signup function with toast
+      console.log('Signup failed:', error);
     }
-  };
+  }
+};
 
   return (
     <div className="min-h-screen relative overflow-hidden">

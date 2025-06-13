@@ -130,31 +130,38 @@ const LoginPage = () => {
 
                 {/* Password Input */}
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Password</label>
-                  <div className="relative group">
-                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                      <Lock className="h-5 w-5 text-gray-400 group-focus-within:text-purple-500 transition-colors" />
-                    </div>
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      className="w-full pl-12 pr-12 py-4 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 placeholder-gray-400"
-                      placeholder="••••••••"
-                      value={formData.password}
-                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    />
-                    <button
-                      type="button"
-                      className="absolute inset-y-0 right-0 pr-4 flex items-center hover:bg-gray-100 rounded-r-xl px-2 transition-colors"
-                      onClick={() => setShowPassword(!showPassword)}
-                    >
-                      {showPassword ? (
-                        <EyeOff className="h-5 w-5 text-gray-500" />
-                      ) : (
-                        <Eye className="h-5 w-5 text-gray-500" />
-                      )}
-                    </button>
-                  </div>
-                </div>
+  <label className="text-sm font-semibold text-gray-700">Password</label>
+  <div className="relative group">
+    {/* Lock Icon */}
+    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+      <Lock className="h-5 w-5 text-gray-400 group-focus-within:text-purple-500 transition-colors" />
+    </div>
+
+    {/* Password Input */}
+    <input
+      type={showPassword ? "text" : "password"}
+      className="w-full pl-12 pr-12 py-4 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 placeholder-gray-400 text-gray-900"
+      placeholder="••••••••"
+      value={formData.password}
+      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+    />
+
+    {/* Toggle Visibility */}
+    <button
+      type="button"
+      onClick={() => setShowPassword(!showPassword)}
+      className="absolute right-0 inset-y-0 px-4 flex items-center bg-transparent rounded-r-xl focus:outline-none"
+    >
+      {showPassword ? (
+        <EyeOff className="h-5 w-5 text-gray-500 hover:text-purple-600 transition-colors" />
+      ) : (
+        <Eye className="h-5 w-5 text-gray-500 hover:text-purple-600 transition-colors" />
+      )}
+    </button>
+  </div>
+</div>
+
+
 
                 {/* Login Button */}
                 <button 
