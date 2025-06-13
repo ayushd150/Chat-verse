@@ -17,26 +17,41 @@ export const useAuthStore = create((set, get) => ({
   socket: null,
 
   // Check authentication
-  checkAuth: async () => {
-    try {
-      console.log('🔍 Checking auth...');
-      console.log('🍪 Current cookies:', document.cookie);
-      
-      const res = await axiosInstance.get('/auth/check');
-      console.log('✅ Auth check successful:', res.data);
-      set({ authUser: res.data, isCheckingAuth: false });
-      get().connectSocket();
-      
-      return res.data;
-    } catch (error) {
-      console.log('❌ Auth check failed:');
-      console.log('Status:', error.response?.status);
-      console.log('Error data:', error.response?.data);
-      console.log('Request headers:', error.config?.headers);
-      set({ authUser: null, isCheckingAuth: false });
-      return null;
-    }
-  },
+  // Replace your checkAuth function temporarily with this debug version
+checkAuth: async () => {
+  try {
+    console.log('🔍 Starting auth check...');
+    console.log('🌐 Base URL:', import.meta.env.VITE_BASE_URL);
+    console.log('🍪 All cookies:', document.cookie);
+    
+    // Check if we have a token cookie
+    const tokenCookie = document.cookie
+      .split('; ')
+      .find(row => row.startsWith('token='));
+    console.log('🎫 Token cookie:', tokenCookie);
+    
+    const res = await axiosInstance.get('/auth/check');
+    console.log('✅ Auth check successful:', res.data);
+    console.log('📊 Response status:', res.status);
+    console.log('📋 Response headers:', res.headers);
+    
+    set({ authUser: res.data, isCheckingAuth: false });
+    get().connectSocket();
+    
+    return res.data;
+  } catch (error) {
+    console.log('❌ Auth check failed:');
+    console.log('📊 Status:', error.response?.status);
+    console.log('📄 Error data:', error.response?.data);
+    console.log('🌐 Request URL:', error.config?.url);
+    console.log('📋 Request headers:', error.config?.headers);
+    console.log('🍪 Cookies sent:', error.config?.headers?.Cookie);
+    console.log('🔧 Full error:', error);
+    
+    set({ authUser: null, isCheckingAuth: false });
+    return null;
+  }
+},
 
   // Signup
   signup: async (data) => {
