@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { axiosInstance } from '../lib/axios.js';
 import toast from 'react-hot-toast';
 import { io } from 'socket.io-client';
+import { useChatStore } from './useChatStore.js';
 
 const BASE_URL = import.meta.env.VITE_BASE_URL;
 
@@ -166,43 +167,51 @@ checkAuth: async () => {
 
   // Connect Socket
   connectSocket: () => {
-    const { authUser } = get();
+  const { authUser } = get();
 
-    if (!authUser || get().socket?.connected) return;
+  if (!authUser || get().socket?.connected) return;
 
-    const socket = io(BASE_URL, {
-      query: {
-        userId: authUser._id,
-      },
-    });
-    
-    socket.connect();
-    set({ socket: socket });
-    
-    socket.on('getOnlineUsers', (userIds) => {
-      set({ onlineUsers: userIds });
-    });
-    
-    socket.on('getTypingUsers', (userIds) => {
-      set({ typingUsers: userIds });
-    });
+  const socket = io(BASE_URL, {
+    query: {
+      userId: authUser._id,
+    },
+  });
+  
+  socket.connect();
+  set({ socket: socket });
+  
+  socket.on('getOnlineUsers', (userIds) => {
+    set({ onlineUsers: userIds });
+  });
+  
+  socket.on('getTypingUsers', (userIds) => {
+    set({ typingUsers: userIds });
+  });
 
-    socket.on('connect', () => {
-      console.log('🔌 Socket connected');
-    });
+  socket.on('connect', () => {
+    console.log('🔌 Socket connected');
+    // Initialize chat message listeners after socket connects
+    setTimeout(() => {
+      useChatStore.getState().initializeSocketListeners();
+    }, 100); // Small delay to ensure store is ready
+  });
 
-    socket.on('disconnect', () => {
-      console.log('🔌 Socket disconnected');
-    });
-  },
+  socket.on('disconnect', () => {
+    console.log('🔌 Socket disconnected');
+    // Clean up chat listeners when socket disconnects
+    useChatStore.getState().cleanupSocketListeners();
+  });
+},
 
-  // Disconnect Socket
-  disconnectSocket: () => {
-    if (get().socket?.connected) {
-      get().socket.disconnect();
-      set({ socket: null });
-    }
-  },
+// Update your disconnectSocket function:
+disconnectSocket: () => {
+  if (get().socket?.connected) {
+    // Clean up chat listeners before disconnecting
+    useChatStore.getState().cleanupSocketListeners();
+    get().socket.disconnect();
+    set({ socket: null });
+  }
+},
 
   // Helper function to check if user is authenticated
   isAuthenticated: () => {
