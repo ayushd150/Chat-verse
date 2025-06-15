@@ -1,225 +1,768 @@
-import { create } from 'zustand';
-import { axiosInstance } from '../lib/axios.js';
-import toast from 'react-hot-toast';
-import { io } from 'socket.io-client';
-import { useChatStore } from './useChatStore.js';
+import { create } from "zustand";
+import { axiosInstance } from "../lib/axios";
+import toast from "react-hot-toast";
+import { io } from "socket.io-client";
 
-const BASE_URL = import.meta.env.VITE_BASE_URL;
+// Configuration object for customizable settings
+const AUTH_CONFIG = {
+  // Storage keys - can be customized per app
+  TOKEN_KEY: import.meta.env.VITE_TOKEN_KEY || "chat_access_token",
+  REFRESH_TOKEN_KEY: import.meta.env.VITE_REFRESH_TOKEN_KEY || "chat_refresh_token",
+  REMEMBER_ME_KEY: import.meta.env.VITE_REMEMBER_ME_KEY || "chat_remember_me",
+  USER_KEY: import.meta.env.VITE_USER_KEY || "chat_user",
+  
+  // API endpoints - configurable
+  ENDPOINTS: {
+    LOGIN: import.meta.env.VITE_LOGIN_ENDPOINT || "/auth/login",
+    SIGNUP: import.meta.env.VITE_SIGNUP_ENDPOINT || "/auth/signup",
+    LOGOUT: import.meta.env.VITE_LOGOUT_ENDPOINT || "/auth/logout",
+    CHECK_AUTH: import.meta.env.VITE_CHECK_AUTH_ENDPOINT || "/auth/check",
+    REFRESH_TOKEN: import.meta.env.VITE_REFRESH_TOKEN_ENDPOINT || "/auth/refresh",
+    FORGOT_PASSWORD: import.meta.env.VITE_FORGOT_PASSWORD_ENDPOINT || "/auth/forgot-password",
+    RESET_PASSWORD: import.meta.env.VITE_RESET_PASSWORD_ENDPOINT || "/auth/reset-password",
+    UPDATE_PROFILE: import.meta.env.VITE_UPDATE_PROFILE_ENDPOINT || "/auth/update-profile",
+    STORAGE_INFO: import.meta.env.VITE_STORAGE_INFO_ENDPOINT || "/auth/storage-info",
+    CLEAR_DATA: import.meta.env.VITE_CLEAR_DATA_ENDPOINT || "/auth/clear-data"
+  },
+  
+  // Socket configuration
+  SOCKET_URL: import.meta.env.VITE_BASE_URL || window.location.origin,
+  SOCKET_OPTIONS: {
+    autoConnect: false,
+    reconnection: true,
+    reconnectionDelay: 1000,
+    reconnectionAttempts: 5,
+    timeout: 20000,
+    transports: ['websocket', 'polling'], // Add both transports
+    upgrade: true,
+    ...JSON.parse(import.meta.env.VITE_SOCKET_OPTIONS || "{}")
+  },
+  
+  // Toast messages - customizable
+  MESSAGES: {
+    SIGNUP_SUCCESS: import.meta.env.VITE_MSG_SIGNUP_SUCCESS || "Account created successfully! Please log in.",
+    SIGNUP_ERROR: import.meta.env.VITE_MSG_SIGNUP_ERROR || "Failed to create account",
+    LOGIN_WELCOME: import.meta.env.VITE_MSG_LOGIN_WELCOME || "Welcome back, {name}!",
+    LOGIN_ERROR: import.meta.env.VITE_MSG_LOGIN_ERROR || "Login failed",
+    LOGOUT_SUCCESS: import.meta.env.VITE_MSG_LOGOUT_SUCCESS || "Logged out successfully",
+    SESSION_EXPIRED: import.meta.env.VITE_MSG_SESSION_EXPIRED || "Session expired. Please log in again.",
+    PROFILE_UPDATE_SUCCESS: import.meta.env.VITE_MSG_PROFILE_SUCCESS || "Profile updated successfully!",
+    PROFILE_UPDATE_ERROR: import.meta.env.VITE_MSG_PROFILE_ERROR || "Failed to update profile",
+    RESET_EMAIL_SUCCESS: import.meta.env.VITE_MSG_RESET_EMAIL_SUCCESS || "Password reset email sent! Check your inbox.",
+    RESET_EMAIL_ERROR: import.meta.env.VITE_MSG_RESET_EMAIL_ERROR || "Failed to send reset email",
+    RESET_PASSWORD_SUCCESS: import.meta.env.VITE_MSG_RESET_SUCCESS || "Password reset successfully! Please log in with your new password.",
+    RESET_PASSWORD_ERROR: import.meta.env.VITE_MSG_RESET_ERROR || "Failed to reset password",
+    DATA_CLEAR_SUCCESS: import.meta.env.VITE_MSG_DATA_CLEAR_SUCCESS || "All user data cleared successfully",
+    DATA_CLEAR_ERROR: import.meta.env.VITE_MSG_DATA_CLEAR_ERROR || "Failed to clear user data"
+  },
+  
+  // Feature flags
+  FEATURES: {
+    AUTO_LOGIN_AFTER_SIGNUP: import.meta.env.VITE_AUTO_LOGIN_AFTER_SIGNUP === "true",
+    ENABLE_SOCKET: import.meta.env.VITE_ENABLE_SOCKET !== "false",
+    ENABLE_REMEMBER_ME: import.meta.env.VITE_ENABLE_REMEMBER_ME !== "false",
+    ENABLE_AUTO_REFRESH: import.meta.env.VITE_ENABLE_AUTO_REFRESH !== "false",
+    SHOW_TOAST_MESSAGES: import.meta.env.VITE_SHOW_TOAST_MESSAGES !== "false"
+  }
+};
+
+// Token management utilities
+const setTokens = (accessToken, refreshToken = null, rememberMe = false) => {
+  if (rememberMe && AUTH_CONFIG.FEATURES.ENABLE_REMEMBER_ME) {
+    localStorage.setItem(AUTH_CONFIG.TOKEN_KEY, accessToken);
+    if (refreshToken) {
+      localStorage.setItem(AUTH_CONFIG.REFRESH_TOKEN_KEY, refreshToken);
+    }
+    localStorage.setItem(AUTH_CONFIG.REMEMBER_ME_KEY, "true");
+  } else {
+    sessionStorage.setItem(AUTH_CONFIG.TOKEN_KEY, accessToken);
+    if (refreshToken) {
+      sessionStorage.setItem(AUTH_CONFIG.REFRESH_TOKEN_KEY, refreshToken);
+    }
+    localStorage.removeItem(AUTH_CONFIG.TOKEN_KEY);
+    localStorage.removeItem(AUTH_CONFIG.REFRESH_TOKEN_KEY);
+    localStorage.removeItem(AUTH_CONFIG.REMEMBER_ME_KEY);
+  }
+};
+
+const getStoredToken = () => {
+  return localStorage.getItem(AUTH_CONFIG.TOKEN_KEY) || sessionStorage.getItem(AUTH_CONFIG.TOKEN_KEY);
+};
+
+const getStoredRefreshToken = () => {
+  return localStorage.getItem(AUTH_CONFIG.REFRESH_TOKEN_KEY) || sessionStorage.getItem(AUTH_CONFIG.REFRESH_TOKEN_KEY);
+};
+
+const getRememberMeStatus = () => {
+  return localStorage.getItem(AUTH_CONFIG.REMEMBER_ME_KEY) === "true";
+};
+
+const clearTokens = () => {
+  localStorage.removeItem(AUTH_CONFIG.TOKEN_KEY);
+  localStorage.removeItem(AUTH_CONFIG.REFRESH_TOKEN_KEY);
+  localStorage.removeItem(AUTH_CONFIG.REMEMBER_ME_KEY);
+  localStorage.removeItem(AUTH_CONFIG.USER_KEY);
+  sessionStorage.removeItem(AUTH_CONFIG.TOKEN_KEY);
+  sessionStorage.removeItem(AUTH_CONFIG.REFRESH_TOKEN_KEY);
+};
+
+const setStoredUser = (user, rememberMe = false) => {
+  const storage = (rememberMe && AUTH_CONFIG.FEATURES.ENABLE_REMEMBER_ME) ? localStorage : sessionStorage;
+  storage.setItem(AUTH_CONFIG.USER_KEY, JSON.stringify(user));
+  
+  if (!rememberMe || !AUTH_CONFIG.FEATURES.ENABLE_REMEMBER_ME) {
+    localStorage.removeItem(AUTH_CONFIG.USER_KEY);
+  }
+};
+
+const getStoredUser = () => {
+  const stored = localStorage.getItem(AUTH_CONFIG.USER_KEY) || sessionStorage.getItem(AUTH_CONFIG.USER_KEY);
+  return stored ? JSON.parse(stored) : null;
+};
+
+const showToast = (type, message) => {
+  if (AUTH_CONFIG.FEATURES.SHOW_TOAST_MESSAGES) {
+    toast[type](message);
+  }
+};
 
 export const useAuthStore = create((set, get) => ({
-  // State
   authUser: null,
   isSigningUp: false,
   isLoggingIn: false,
   isUpdatingProfile: false,
-  isCheckingAuth: true,
+  isCheckingAuth: false,
+  isSendingResetEmail: false,
+  isResettingPassword: false,
   onlineUsers: [],
-  typingUsers: [],
   socket: null,
+  rememberMe: getRememberMeStatus(),
+  config: AUTH_CONFIG,
+  socketReconnectAttempts: 0,
+  lastMessageTimestamp: null, // Track last message for unread detection
 
-  // Check authentication
-  // Replace your checkAuth function temporarily with this debug version
-checkAuth: async () => {
-  try {
-    console.log('🔍 Starting auth check...');
-    console.log('🌐 Base URL:', import.meta.env.VITE_BASE_URL);
-    console.log('🍪 All cookies:', document.cookie);
-    
-    // Check if we have a token cookie
-    const tokenCookie = document.cookie
-      .split('; ')
-      .find(row => row.startsWith('token='));
-    console.log('🎫 Token cookie:', tokenCookie);
-    
-    const res = await axiosInstance.get('/auth/check');
-    console.log('✅ Auth check successful:', res.data);
-    console.log('📊 Response status:', res.status);
-    console.log('📋 Response headers:', res.headers);
-    
-    set({ authUser: res.data, isCheckingAuth: false });
-    get().connectSocket();
-    
-    return res.data;
-  } catch (error) {
-    console.log('❌ Auth check failed:');
-    console.log('📊 Status:', error.response?.status);
-    console.log('📄 Error data:', error.response?.data);
-    console.log('🌐 Request URL:', error.config?.url);
-    console.log('📋 Request headers:', error.config?.headers);
-    console.log('🍪 Cookies sent:', error.config?.headers?.Cookie);
-    console.log('🔧 Full error:', error);
-    
-    set({ authUser: null, isCheckingAuth: false });
-    return null;
-  }
-},
+  updateConfig: (newConfig) => {
+    Object.assign(AUTH_CONFIG, newConfig);
+    set({});
+  },
 
-  // Signup
-  signup: async (data) => {
-  set({ isSigningUp: true });
-  try {
-    console.log('📝 Signing up...');
-    const res = await axiosInstance.post('/auth/signup', data);
-    console.log('✅ Signup successful:', res.data);
-    
-    // DON'T set authUser here - user should login separately
-    // set({ authUser: res.data, isSigningUp: false }); // REMOVE THIS LINE
-    set({ isSigningUp: false }); // Only set loading to false
-    
-    toast.success('Account created successfully! Please login with your credentials.');
-    
-    // DON'T connect socket here - user is not authenticated yet
-    // get().connectSocket(); // REMOVE THIS LINE
-    
-    return res.data;
-  } catch (error) {
-    console.log('❌ Signup failed:', error.response?.data);
-    const errorMessage = error.response?.data?.error || error.response?.data?.message || 'Signup failed';
-    toast.error(errorMessage);
-    set({ isSigningUp: false });
-    throw error;
-  }
-},
+  initializeAuth: async () => {
+    const token = getStoredToken();
+    const storedUser = getStoredUser();
+    const rememberMe = getRememberMeStatus();
 
-  // Login
-  login: async (data) => {
-    set({ isLoggingIn: true });
+    if (token && storedUser) {
+      set({ 
+        authUser: storedUser, 
+        rememberMe,
+        isCheckingAuth: false 
+      });
+      
+      axiosInstance.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+      
+      try {
+        await get().checkAuth();
+      } catch (error) {
+        if (AUTH_CONFIG.FEATURES.ENABLE_AUTO_REFRESH) {
+          await get().refreshAuthToken();
+        }
+      }
+    } else {
+      set({ isCheckingAuth: false });
+    }
+  },
+
+  checkAuth: async () => {
     try {
-      console.log('🔐 Logging in...');
-      const res = await axiosInstance.post('/auth/login', data);
-      console.log('✅ Login successful:', res.data);
-      console.log('🍪 Cookies after login:', document.cookie);
+      set({ isCheckingAuth: true });
+      const token = getStoredToken();
       
-      set({ authUser: res.data, isLoggingIn: false });
-      toast.success('Logged in successfully');
-      get().connectSocket();
+      if (!token) {
+        set({ authUser: null, isCheckingAuth: false });
+        return;
+      }
+
+      const res = await axiosInstance.get(AUTH_CONFIG.ENDPOINTS.CHECK_AUTH);
       
-      // Test auth check immediately after login
-      console.log('🔍 Testing auth check after login...');
-      await get().checkAuth();
-      
-      return res.data;
+      if (res.data.user) {
+        set({ authUser: res.data.user });
+        
+        if (AUTH_CONFIG.FEATURES.ENABLE_SOCKET) {
+          get().connectSocket();
+        }
+        
+        setStoredUser(res.data.user, get().rememberMe);
+      } else {
+        await get().logout();
+      }
     } catch (error) {
-      console.log('❌ Login failed:', error.response?.data);
-      const errorMessage = error.response?.data?.message || error.response?.data?.error || 'Login failed';
-      toast.error(errorMessage);
-      set({ isLoggingIn: false });
+      console.error("Auth check failed:", error);
+      
+      const refreshToken = getStoredRefreshToken();
+      if (refreshToken && AUTH_CONFIG.FEATURES.ENABLE_AUTO_REFRESH) {
+        const refreshSuccess = await get().refreshAuthToken();
+        if (!refreshSuccess) {
+          await get().logout();
+        }
+      } else {
+        await get().logout();
+      }
+    } finally {
+      set({ isCheckingAuth: false });
+    }
+  },
+
+  refreshAuthToken: async () => {
+    try {
+      const refreshToken = getStoredRefreshToken();
+      if (!refreshToken) {
+        return false;
+      }
+
+      const res = await axiosInstance.post(AUTH_CONFIG.ENDPOINTS.REFRESH_TOKEN, {
+        refreshToken
+      });
+
+      if (res.data.accessToken) {
+        const { accessToken, refreshToken: newRefreshToken, user } = res.data;
+        const rememberMe = get().rememberMe;
+        
+        setTokens(accessToken, newRefreshToken, rememberMe);
+        axiosInstance.defaults.headers.common["Authorization"] = `Bearer ${accessToken}`;
+        
+        set({ authUser: user });
+        setStoredUser(user, rememberMe);
+        
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error("Token refresh failed:", error);
+      return false;
+    }
+  },
+
+  signup: async (data) => {
+    set({ isSigningUp: true });
+    try {
+      const res = await axiosInstance.post(AUTH_CONFIG.ENDPOINTS.SIGNUP, data);
+      
+      if (res.data.success) {
+        set({ isSigningUp: false });
+        
+        if (AUTH_CONFIG.FEATURES.AUTO_LOGIN_AFTER_SIGNUP && res.data.accessToken) {
+          const { accessToken, refreshToken, user } = res.data;
+          const rememberMe = get().rememberMe;
+          
+          setTokens(accessToken, refreshToken, rememberMe);
+          setStoredUser(user, rememberMe);
+          
+          set({ authUser: user });
+          axiosInstance.defaults.headers.common["Authorization"] = `Bearer ${accessToken}`;
+          
+          if (AUTH_CONFIG.FEATURES.ENABLE_SOCKET) {
+            get().connectSocket();
+          }
+          
+          showToast("success", AUTH_CONFIG.MESSAGES.LOGIN_WELCOME.replace("{name}", user.fullName));
+        } else {
+          showToast("success", AUTH_CONFIG.MESSAGES.SIGNUP_SUCCESS);
+        }
+        
+        return { success: true };
+      }
+    } catch (error) {
+      console.error("Signup error:", error);
+      showToast("error", error.response?.data?.message || AUTH_CONFIG.MESSAGES.SIGNUP_ERROR);
+      set({ isSigningUp: false });
       throw error;
     }
   },
 
-  // Logout
-  logout: async () => {
+  login: async (data, rememberMe = false) => {
+    set({ isLoggingIn: true });
     try {
-      console.log('🚪 Logging out...');
-      await axiosInstance.post('/auth/logout');
-      console.log('✅ Logout successful');
-      console.log('🍪 Cookies after logout:', document.cookie);
+      const res = await axiosInstance.post(AUTH_CONFIG.ENDPOINTS.LOGIN, {
+        ...data,
+        rememberMe
+      });
       
-      set({ authUser: null });
-      toast.success('Logged out successfully');
-      get().disconnectSocket();
+      if (res.data.accessToken) {
+        const { accessToken, refreshToken, user } = res.data;
+        
+        setTokens(accessToken, refreshToken, rememberMe);
+        setStoredUser(user, rememberMe);
+        
+        set({ 
+          authUser: user, 
+          rememberMe,
+          isLoggingIn: false 
+        });
+        
+        axiosInstance.defaults.headers.common["Authorization"] = `Bearer ${accessToken}`;
+        
+        if (AUTH_CONFIG.FEATURES.ENABLE_SOCKET) {
+          get().connectSocket();
+        }
+        
+        showToast("success", AUTH_CONFIG.MESSAGES.LOGIN_WELCOME.replace("{name}", user.fullName));
+      }
     } catch (error) {
-      console.log('❌ Logout failed:', error.response?.data);
-      const errorMessage = error.response?.data?.error || error.response?.data?.message || 'Logout failed';
-      toast.error(errorMessage);
+      console.error("Login error:", error);
+      showToast("error", error.response?.data?.message || AUTH_CONFIG.MESSAGES.LOGIN_ERROR);
+      set({ isLoggingIn: false });
     }
   },
 
-  // Update Profile
+  logout: async () => {
+    try {
+      const refreshToken = getStoredRefreshToken();
+      
+      if (refreshToken) {
+        await axiosInstance.post(AUTH_CONFIG.ENDPOINTS.LOGOUT, { refreshToken });
+      }
+    } catch (error) {
+      console.error("Logout error:", error);
+    } finally {
+      clearTokens();
+      delete axiosInstance.defaults.headers.common["Authorization"];
+      
+      if (get().socket?.connected) {
+        get().socket.disconnect();
+      }
+      
+      set({ 
+        authUser: null, 
+        socket: null, 
+        rememberMe: false,
+        onlineUsers: [],
+        socketReconnectAttempts: 0,
+        lastMessageTimestamp: null
+      });
+      
+      showToast("success", AUTH_CONFIG.MESSAGES.LOGOUT_SUCCESS);
+    }
+  },
+
+  forceLogout: () => {
+    clearTokens();
+    delete axiosInstance.defaults.headers.common["Authorization"];
+    
+    if (get().socket?.connected) {
+      get().socket.disconnect();
+    }
+    
+    set({ 
+      authUser: null, 
+      socket: null, 
+      rememberMe: false,
+      onlineUsers: [],
+      socketReconnectAttempts: 0,
+      lastMessageTimestamp: null
+    });
+    
+    showToast("error", AUTH_CONFIG.MESSAGES.SESSION_EXPIRED);
+  },
+
+  sendResetPasswordEmail: async (email) => {
+    set({ isSendingResetEmail: true });
+    try {
+      const res = await axiosInstance.post(AUTH_CONFIG.ENDPOINTS.FORGOT_PASSWORD, { email });
+      
+      if (res.data.success) {
+        showToast("success", AUTH_CONFIG.MESSAGES.RESET_EMAIL_SUCCESS);
+        return { success: true };
+      }
+    } catch (error) {
+      console.error("Forgot password error:", error);
+      showToast("error", error.response?.data?.message || AUTH_CONFIG.MESSAGES.RESET_EMAIL_ERROR);
+      throw error;
+    } finally {
+      set({ isSendingResetEmail: false });
+    }
+  },
+
+  resetPassword: async (token, newPassword) => {
+    set({ isResettingPassword: true });
+    try {
+      const res = await axiosInstance.post(AUTH_CONFIG.ENDPOINTS.RESET_PASSWORD, {
+        token,
+        password: newPassword
+      });
+      
+      if (res.data.success) {
+        showToast("success", AUTH_CONFIG.MESSAGES.RESET_PASSWORD_SUCCESS);
+        return { success: true };
+      }
+    } catch (error) {
+      console.error("Reset password error:", error);
+      showToast("error", error.response?.data?.message || AUTH_CONFIG.MESSAGES.RESET_PASSWORD_ERROR);
+      throw error;
+    } finally {
+      set({ isResettingPassword: false });
+    }
+  },
+
+  // Enhanced updateProfile with better error handling and validation
   updateProfile: async (data) => {
     set({ isUpdatingProfile: true });
     try {
-      const res = await axiosInstance.put('/profile/update-profile', data);
-      set({ authUser: res.data });
-      toast.success('Profile updated successfully');
-      return res.data;
+      console.log("🔄 Updating profile with data:", data);
+      
+      // Validate email format if email is being updated
+      if (data.email) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(data.email)) {
+          throw new Error("Invalid email format");
+        }
+      }
+      
+      const res = await axiosInstance.put(AUTH_CONFIG.ENDPOINTS.UPDATE_PROFILE, data);
+      
+      console.log("✅ Backend response:", res.data);
+      
+      if (res.data.user) {
+        const updatedUser = res.data.user;
+        
+        console.log("📊 Data Comparison:");
+        console.log("📤 Sent:", data);
+        console.log("📥 Received:", updatedUser);
+        
+        // Check each field that was sent for update
+        const failedUpdates = Object.keys(data).filter(key => {
+          const sent = data[key];
+          const received = updatedUser[key];
+          const isEqual = sent === received;
+          console.log(`🔍 ${key}: sent="${sent}" received="${received}" updated=${isEqual}`);
+          return !isEqual;
+        });
+        
+        // Update the store with new user data
+        set({ authUser: updatedUser, isUpdatingProfile: false });
+        setStoredUser(updatedUser, get().rememberMe);
+        
+        if (failedUpdates.length > 0) {
+          console.warn("⚠️ These fields were not updated:", failedUpdates);
+          
+          // Create a more detailed error message
+          const failedFields = failedUpdates.map(field => {
+            const sent = data[field];
+            const received = updatedUser[field];
+            return `${field}: sent "${sent}" but got "${received}"`;
+          }).join(', ');
+          
+          const errorMsg = `Some fields were not updated: ${failedFields}`;
+          toast.error(errorMsg);
+          
+          // Return both success and failure info
+          return {
+            success: false,
+            user: updatedUser,
+            failedFields: failedUpdates,
+            message: errorMsg
+          };
+        } else {
+          console.log("✅ All fields updated successfully");
+          toast.success(AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_SUCCESS);
+          
+          // If socket is connected, emit user update event
+          if (get().socket?.connected) {
+            get().socket.emit('userUpdated', updatedUser);
+          }
+          
+          return {
+            success: true,
+            user: updatedUser,
+            message: "Profile updated successfully"
+          };
+        }
+      } else {
+        console.error("❌ No user data in response");
+        throw new Error("No user data returned from server");
+      }
     } catch (error) {
-      console.log('error in updateProfile:', error.response);
-      const errorMessage = error.response?.data?.error || error.response?.data?.message || 'Profile update failed';
+      console.error("❌ Profile update error:", error);
+      console.error("❌ Error details:", {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        config: error.config
+      });
+      
+      const errorMessage = error.response?.data?.message || error.message || AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_ERROR;
       toast.error(errorMessage);
-      throw error;
-    } finally {
       set({ isUpdatingProfile: false });
+      
+      return {
+        success: false,
+        error: errorMessage,
+        details: error.response?.data
+      };
     }
   },
 
-  // Change Preference
-  changePreference: async (value) => {
-    const userId = get().authUser?._id;
-    if (!userId) {
-      toast.error('User not authenticated');
+  // Enhanced socket connection with better message handling
+  connectSocket: () => {
+    const { authUser, socket, socketReconnectAttempts } = get();
+    
+    if (!authUser || socket?.connected || !AUTH_CONFIG.FEATURES.ENABLE_SOCKET) {
+      console.log("🚫 Socket connection skipped:", {
+        hasUser: !!authUser,
+        isConnected: socket?.connected,
+        socketEnabled: AUTH_CONFIG.FEATURES.ENABLE_SOCKET
+      });
       return;
     }
+
+    console.log("🔌 Connecting socket for user:", authUser._id);
+
+    const newSocket = io(AUTH_CONFIG.SOCKET_URL, {
+      ...AUTH_CONFIG.SOCKET_OPTIONS,
+      auth: {
+        userId: authUser._id,
+        token: getStoredToken(),
+      },
+    });
+
+    // Connection events
+    newSocket.on("connect", () => {
+      console.log("✅ Socket connected successfully");
+      console.log("🆔 Socket ID:", newSocket.id);
+      set({ socketReconnectAttempts: 0 });
+      
+      // Request initial data
+      setTimeout(() => {
+        newSocket.emit("getOnlineUsers");
+        newSocket.emit("getUnreadMessages"); // Request unread messages
+      }, 500);
+    });
+
+    newSocket.on("disconnect", (reason) => {
+      console.log("❌ Socket disconnected:", reason);
+      
+      // Handle different disconnect reasons
+      if (reason === "io server disconnect") {
+        // Server initiated disconnect, try to reconnect
+        setTimeout(() => {
+          if (socketReconnectAttempts < 3) {
+            console.log("🔄 Attempting to reconnect...");
+            newSocket.connect();
+            set({ socketReconnectAttempts: socketReconnectAttempts + 1 });
+          }
+        }, 2000);
+      }
+    });
+
+    newSocket.on("connect_error", (error) => {
+      console.error("❌ Socket connection error:", error);
+    });
+
+    newSocket.on("reconnect", (attemptNumber) => {
+      console.log("🔄 Socket reconnected after", attemptNumber, "attempts");
+      set({ socketReconnectAttempts: 0 });
+    });
+
+    // Online users events
+    newSocket.on("getOnlineUsers", (userIds) => {
+      console.log("👥 Online users updated:", userIds);
+      set({ onlineUsers: userIds });
+    });
+
+    newSocket.on("userConnected", (userId) => {
+      console.log("✅ User connected:", userId);
+      const currentOnlineUsers = get().onlineUsers;
+      if (!currentOnlineUsers.includes(userId)) {
+        set({ onlineUsers: [...currentOnlineUsers, userId] });
+      }
+    });
+
+    newSocket.on("userDisconnected", (userId) => {
+      console.log("❌ User disconnected:", userId);
+      const currentOnlineUsers = get().onlineUsers;
+      set({ onlineUsers: currentOnlineUsers.filter(id => id !== userId) });
+    });
+
+    // Message events for unread detection
+    newSocket.on("newMessage", (message) => {
+      console.log("📨 New message received:", message);
+      set({ lastMessageTimestamp: Date.now() });
+      
+      // You can emit this to other parts of your app
+      window.dispatchEvent(new CustomEvent('newMessage', { detail: message }));
+    });
+
+    newSocket.on("messageRead", (data) => {
+      console.log("👁️ Message marked as read:", data);
+      window.dispatchEvent(new CustomEvent('messageRead', { detail: data }));
+    });
+
+    newSocket.on("unreadCount", (count) => {
+      console.log("📬 Unread messages count:", count);
+      window.dispatchEvent(new CustomEvent('unreadCount', { detail: count }));
+    });
+
+    // Error handling
+    newSocket.on("error", (error) => {
+      console.error("🚨 Socket error:", error);
+    });
+
+    newSocket.connect();
+    set({ socket: newSocket });
+  },
+
+  disconnectSocket: () => {
+    const socket = get().socket;
+    if (socket?.connected) {
+      console.log("🔌 Disconnecting socket...");
+      socket.disconnect();
+    }
+    set({ socket: null, onlineUsers: [], socketReconnectAttempts: 0 });
+  },
+
+  // Method to manually refresh socket connection
+  refreshSocket: () => {
+    console.log("🔄 Refreshing socket connection...");
+    get().disconnectSocket();
+    setTimeout(() => {
+      get().connectSocket();
+    }, 1000);
+  },
+
+  // Method to check socket status
+  getSocketStatus: () => {
+    const socket = get().socket;
+    return {
+      connected: socket?.connected || false,
+      id: socket?.id || null,
+      transport: socket?.io?.engine?.transport?.name || null,
+      reconnectAttempts: get().socketReconnectAttempts
+    };
+  },
+
+  toggleRememberMe: () => {
+    if (!AUTH_CONFIG.FEATURES.ENABLE_REMEMBER_ME) return;
     
-    try {
-      const res = await axiosInstance.put('/profile/update-preference', { value, userId });
-      set({ authUser: res.data });
-      toast.success('Preference updated successfully');
-      return res.data;
-    } catch (error) {
-      console.log('error in changePreference:', error.response);
-      const errorMessage = error.response?.data?.error || error.response?.data?.message || 'Preference update failed';
-      toast.error(errorMessage);
-      throw error;
+    const newRememberMe = !get().rememberMe;
+    set({ rememberMe: newRememberMe });
+    
+    if (!newRememberMe) {
+      const token = getStoredToken();
+      const refreshToken = getStoredRefreshToken();
+      const user = getStoredUser();
+      
+      if (token) {
+        clearTokens();
+        sessionStorage.setItem(AUTH_CONFIG.TOKEN_KEY, token);
+        if (refreshToken) {
+          sessionStorage.setItem(AUTH_CONFIG.REFRESH_TOKEN_KEY, refreshToken);
+        }
+        if (user) {
+          sessionStorage.setItem(AUTH_CONFIG.USER_KEY, JSON.stringify(user));
+        }
+      }
     }
   },
 
-  // Connect Socket
-  connectSocket: () => {
-  const { authUser } = get();
+  getStorageInfo: async () => {
+    try {
+      const res = await axiosInstance.get(AUTH_CONFIG.ENDPOINTS.STORAGE_INFO);
+      return res.data;
+    } catch (error) {
+      console.error("Failed to get storage info:", error);
+      
+      if (error.response?.status === 404) {
+        console.warn("Storage info endpoint not implemented on backend");
+        return {
+          used: 0,
+          quota: "Unknown",
+          version: import.meta.env.VITE_APP_VERSION || "1.0.0",
+          error: "Storage API not available"
+        };
+      }
+      
+      try {
+        let storageUsed = 0;
+        
+        if (typeof localStorage !== 'undefined') {
+          let localStorageSize = 0;
+          for (let key in localStorage) {
+            if (localStorage.hasOwnProperty(key)) {
+              localStorageSize += localStorage[key].length + key.length;
+            }
+          }
+          storageUsed += localStorageSize;
+        }
+        
+        if (typeof sessionStorage !== 'undefined') {
+          let sessionStorageSize = 0;
+          for (let key in sessionStorage) {
+            if (sessionStorage.hasOwnProperty(key)) {
+              sessionStorageSize += sessionStorage[key].length + key.length;
+            }
+          }
+          storageUsed += sessionStorageSize;
+        }
+        
+        return {
+          used: storageUsed,
+          quota: "5MB (estimated)",
+          version: import.meta.env.VITE_APP_VERSION || "1.0.0",
+          source: "client-calculated"
+        };
+        
+      } catch (clientError) {
+        console.error("Failed to calculate client storage:", clientError);
+        return {
+          used: 0,
+          quota: "Unknown",
+          version: import.meta.env.VITE_APP_VERSION || "1.0.0",
+          error: "Storage calculation failed"
+        };
+      }
+    }
+  },
 
-  if (!authUser || get().socket?.connected) return;
-
-  const socket = io(BASE_URL, {
-    query: {
-      userId: authUser._id,
-    },
-  });
-  
-  socket.connect();
-  set({ socket: socket });
-  
-  socket.on('getOnlineUsers', (userIds) => {
-    set({ onlineUsers: userIds });
-  });
-  
-  socket.on('getTypingUsers', (userIds) => {
-    set({ typingUsers: userIds });
-  });
-
-  socket.on('connect', () => {
-    console.log('🔌 Socket connected');
-    // Initialize chat message listeners after socket connects
-    setTimeout(() => {
-      useChatStore.getState().initializeSocketListeners();
-    }, 100); // Small delay to ensure store is ready
-  });
-
-  socket.on('disconnect', () => {
-    console.log('🔌 Socket disconnected');
-    // Clean up chat listeners when socket disconnects
-    useChatStore.getState().cleanupSocketListeners();
-  });
-},
-
-// Update your disconnectSocket function:
-disconnectSocket: () => {
-  if (get().socket?.connected) {
-    // Clean up chat listeners before disconnecting
-    useChatStore.getState().cleanupSocketListeners();
-    get().socket.disconnect();
-    set({ socket: null });
+  clearUserData: async () => {
+    try {
+      await axiosInstance.post(AUTH_CONFIG.ENDPOINTS.CLEAR_DATA);
+      showToast("success", AUTH_CONFIG.MESSAGES.DATA_CLEAR_SUCCESS);
+    } catch (error) {
+      console.error("Failed to clear user data:", error);
+      showToast("error", AUTH_CONFIG.MESSAGES.DATA_CLEAR_ERROR);
+      throw error;
+    }
   }
-},
-
-  // Helper function to check if user is authenticated
-  isAuthenticated: () => {
-    return !!get().authUser;
-  },
-
-  // Get current user
-  getCurrentUser: () => {
-    return get().authUser;
-  },
 }));
+
+// Enhanced axios interceptor
+axiosInstance.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    
+    if (error.response?.status === 401 && !originalRequest._retry && AUTH_CONFIG.FEATURES.ENABLE_AUTO_REFRESH) {
+      originalRequest._retry = true;
+      
+      const authStore = useAuthStore.getState();
+      const refreshSuccess = await authStore.refreshAuthToken();
+      
+      if (refreshSuccess) {
+        const newToken = getStoredToken();
+        originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        return axiosInstance(originalRequest);
+      } else {
+        authStore.forceLogout();
+        return Promise.reject(error);
+      }
+    }
+    
+    return Promise.reject(error);
+  }
+);
+
+// Initialize auth on store creation
+if (typeof window !== "undefined") {
+  const authStore = useAuthStore.getState();
+  authStore.initializeAuth();
+}

@@ -1,81 +1,100 @@
 import { generateToken } from "../lib/utils.js";
 import User from "../models/userModel.js";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+
+// Helper function to generate refresh token
+const generateRefreshToken = (userId) => {
+  return jwt.sign(
+    { userId }, 
+    process.env.JWT_SECRET, 
+    { expiresIn: "30d" }
+  );
+};
 
 export const signup = async (req, res) => {
   const { fullName, email, password } = req.body;
   try {
+    console.log('📝 === SIGNUP ATTEMPT DEBUG ===');
+    console.log('👤 Full Name:', fullName);
+    console.log('📧 Email:', email);
+    console.log('🔒 Password length:', password?.length);
+
+    // Validation
     if (!fullName || !email || !password) {
+      console.log('❌ Missing required fields');
       return res.status(400).json({ message: "All fields are required" });
     }
+
     if (password.length < 6) {
-      return res
-        .status(400)
-        .json({ error: "Password must be at least 6 characters long" });
+      console.log('❌ Password too short');
+      return res.status(400).json({ 
+        error: "Password must be at least 6 characters long" 
+      });
     }
-    const user = await User.findOne({ email });
-    if (user) {
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      console.log('❌ Email already exists');
       return res.status(400).json({ error: "Email already exists" });
     }
+
+    console.log('🔐 Hashing password...');
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
-    const newUser = new User({ fullName, email, password: hashedPassword });
-    if (newUser) {
-      generateToken(newUser._id, res);
-      await newUser.save();
-      res.status(201).json({
+
+    console.log('💾 Creating new user...');
+    const newUser = new User({ 
+      fullName, 
+      email, 
+      password: hashedPassword 
+    });
+    
+    // Save user to database
+    await newUser.save();
+    console.log('✅ User saved to database');
+
+    // Generate tokens
+    console.log('🎫 Generating tokens...');
+    const accessToken = generateToken(newUser._id, res);
+    const refreshToken = generateRefreshToken(newUser._id);
+    
+    console.log('✅ Tokens generated successfully');
+
+    // Note: generateToken already sets the cookie, so we don't need to set it here
+
+    const responseData = {
+      _id: newUser._id,
+      fullName: newUser.fullName,
+      email: newUser.email,
+      profilePic: newUser.profilePic,
+      accessToken,
+      refreshToken,
+      user: {
         _id: newUser._id,
         fullName: newUser.fullName,
         email: newUser.email,
         profilePic: newUser.profilePic,
-      });
-    } else {
-      return res.status(400).json({ message: "Invalid user data" });
-    }
-  } catch (error) {
-    console.log("error in creating user", error.message);
-    res.status(500).json({ error: "Internal server error" });
-  }
-};
-export const logout = (req, res) => {
-  try {
-    console.log('🚪 === LOGOUT DEBUG ===');
-    
-    // Clear cookie with SAME options as when setting it
-    res.cookie("token", "", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      maxAge: 0, // Expire immediately
-      path: '/', // Same path as when setting
-    });
-    
-    console.log('✅ Cookie cleared successfully');
-    res.status(200).json({ message: "Logged out successfully" });
-    
-  } catch (error) {
-    console.log("❌ Error in logout:", error.message);
-    res.status(500).json({ error: "Internal server error" });
-  }
-};
+      }
+    };
 
-export const checkAuth = (req, res) => {
-  try {
-    res.status(200).json(req.user);
+    console.log('📤 Sending signup response');
+    res.status(201).json(responseData);
+
   } catch (error) {
-    console.log("error in checkAuth", error.message);
+    console.log("❌ Error in signup:", error.message);
+    console.error("Full error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-} 
-// Add this debug version to your authController.js login function
-// Replace your login function in authController.js
-// TEMPORARY DEBUG: Add this to your backend authController.js login function
-// This will help us verify if the token generation is working at all
+};
 
 export const login = async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, rememberMe } = req.body;
   try {
     console.log('🔐 === LOGIN ATTEMPT DEBUG ===');
+    console.log('📧 Email:', email);
+    console.log('🧠 Remember Me:', rememberMe);
     
     if (!email || !password) {
       return res.status(400).json({ message: "All fields are required" });
@@ -91,34 +110,166 @@ export const login = async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    console.log('✅ Password matches, generating token...');
+    console.log('✅ Password matches, generating tokens...');
     
-    // Generate token and set cookie
-    const token = generateToken(user._id, res);
+    // Generate tokens
+    const accessToken = generateToken(user._id, res);
+    const refreshToken = generateRefreshToken(user._id);
     
-    console.log('🎫 Token returned from generateToken:', token ? 'YES' : 'NO');
+    console.log('🎫 Access token generated:', accessToken ? 'YES' : 'NO');
+    console.log('🔄 Refresh token generated:', refreshToken ? 'YES' : 'NO');
+    
+    // Note: generateToken already sets the cookie, so we don't need to set it here
     
     const responseData = {
       _id: user._id,
       fullName: user.fullName,
       email: user.email,
       profilePic: user.profilePic,
-      // TEMPORARY: Include token in response for debugging
-      debug_token: token.substring(0, 20) + '...' // Only first 20 chars for security
+      accessToken,
+      refreshToken,
+      user: {
+        _id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        profilePic: user.profilePic,
+      }
     };
     
-    console.log('📤 Sending response...');
-    
-    // Check if Set-Cookie header is being set
-    const setCookieHeader = res.getHeader('Set-Cookie');
-    console.log('🍪 Set-Cookie header:', setCookieHeader);
-    
+    console.log('📤 Sending login response with tokens');
     res.status(200).json(responseData);
-    
-    console.log('✅ Login response sent');
     
   } catch (error) {
     console.log("❌ Error in login:", error.message);
+    console.error("Full error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const logout = async (req, res) => {
+  try {
+    console.log('🚪 === LOGOUT DEBUG ===');
+    
+    const { refreshToken } = req.body;
+    
+    if (refreshToken) {
+      console.log('🔄 Refresh token provided for logout');
+      // Here you could add logic to blacklist the refresh token
+    }
+    
+    // Clear cookie
+    res.cookie("token", "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 0,
+      path: '/',
+    });
+    
+    console.log('✅ Logout successful');
+    res.status(200).json({ message: "Logged out successfully" });
+    
+  } catch (error) {
+    console.log("❌ Error in logout:", error.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const refreshToken = async (req, res) => {
+  try {
+    console.log('🔄 === REFRESH TOKEN ATTEMPT ===');
+    
+    const { refreshToken } = req.body;
+    
+    if (!refreshToken) {
+      return res.status(401).json({ message: "Refresh token required" });
+    }
+    
+    // Verify refresh token
+    const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
+    console.log('✅ Refresh token decoded:', decoded.userId);
+    
+    const user = await User.findById(decoded.userId).select("-password");
+    
+    if (!user) {
+      console.log('❌ User not found for refresh token');
+      return res.status(401).json({ message: "Invalid refresh token" });
+    }
+    
+    // Generate new tokens
+    const newAccessToken = generateToken(user._id, res);
+    const newRefreshToken = generateRefreshToken(user._id);
+    
+    console.log('✅ New tokens generated successfully');
+    
+    // Note: generateToken already sets the cookie, so we don't need to set it here
+    
+    res.json({
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+      user: {
+        _id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        profilePic: user.profilePic,
+      }
+    });
+    
+  } catch (error) {
+    console.log("❌ Error in refresh token:", error.message);
+    
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ message: "Refresh token expired" });
+    }
+    
+    res.status(401).json({ message: "Invalid refresh token" });
+  }
+};
+
+export const checkAuth = (req, res) => {
+  try {
+    console.log('🔍 === CHECK AUTH ===');
+    console.log('👤 User found:', req.user ? req.user.email : 'No user');
+    
+    res.status(200).json({
+      user: {
+        _id: req.user._id,
+        fullName: req.user.fullName,
+        email: req.user.email,
+        profilePic: req.user.profilePic,
+      }
+    });
+  } catch (error) {
+    console.log("❌ Error in checkAuth:", error.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const updateProfile = async (req, res) => {
+  try {
+    const { fullName, profilePic } = req.body;
+    const userId = req.user._id;
+    
+    if (!fullName) {
+      return res.status(400).json({ message: "Full name is required" });
+    }
+    
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { fullName, profilePic },
+      { new: true }
+    ).select("-password");
+    
+    res.status(200).json({
+      user: {
+        _id: updatedUser._id,
+        fullName: updatedUser.fullName,
+        email: updatedUser.email,
+        profilePic: updatedUser.profilePic,
+      }
+    });
+  } catch (error) {
+    console.log("Error in updateProfile:", error.message);
     res.status(500).json({ error: "Internal server error" });
   }
 };

@@ -7,6 +7,7 @@ import toast from "react-hot-toast";
 
 const LoginPage = () => {
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -28,7 +29,7 @@ const LoginPage = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validateForm()) return;
-    login(formData);
+    login(formData, rememberMe); // Pass rememberMe to login function
   };
 
   return (
@@ -130,38 +131,60 @@ const LoginPage = () => {
 
                 {/* Password Input */}
                 <div className="space-y-2">
-  <label className="text-sm font-semibold text-gray-700">Password</label>
-  <div className="relative group">
-    {/* Lock Icon */}
-    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-      <Lock className="h-5 w-5 text-gray-400 group-focus-within:text-purple-500 transition-colors" />
-    </div>
+                  <label className="text-sm font-semibold text-gray-700">Password</label>
+                  <div className="relative group">
+                    {/* Lock Icon */}
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Lock className="h-5 w-5 text-gray-400 group-focus-within:text-purple-500 transition-colors" />
+                    </div>
 
-    {/* Password Input */}
-    <input
-      type={showPassword ? "text" : "password"}
-      className="w-full pl-12 pr-12 py-4 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 placeholder-gray-400 text-gray-900"
-      placeholder="••••••••"
-      value={formData.password}
-      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-    />
+                    {/* Password Input */}
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      className="w-full pl-12 pr-12 py-4 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 placeholder-gray-400 text-gray-900"
+                      placeholder="••••••••"
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    />
 
-    {/* Toggle Visibility */}
-    <button
-      type="button"
-      onClick={() => setShowPassword(!showPassword)}
-      className="absolute right-0 inset-y-0 px-4 flex items-center bg-transparent rounded-r-xl focus:outline-none"
-    >
-      {showPassword ? (
-        <EyeOff className="h-5 w-5 text-gray-500 hover:text-purple-600 transition-colors" />
-      ) : (
-        <Eye className="h-5 w-5 text-gray-500 hover:text-purple-600 transition-colors" />
-      )}
-    </button>
-  </div>
-</div>
+                    {/* Toggle Visibility */}
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-0 inset-y-0 px-4 flex items-center bg-transparent rounded-r-xl focus:outline-none"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-5 w-5 text-gray-500 hover:text-purple-600 transition-colors" />
+                      ) : (
+                        <Eye className="h-5 w-5 text-gray-500 hover:text-purple-600 transition-colors" />
+                      )}
+                    </button>
+                  </div>
+                </div>
 
-
+                {/* Remember Me Checkbox */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <input
+                      id="remember-me"
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                      className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded cursor-pointer"
+                    />
+                    <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-700 cursor-pointer">
+                      Remember me
+                    </label>
+                  </div>
+                  <div className="text-sm">
+                    <Link 
+                      to="/forgot-password" 
+                      className="font-medium text-purple-600 hover:text-purple-700 transition-colors"
+                    >
+                      Forgot password?
+                    </Link>
+                  </div>
+                </div>
 
                 {/* Login Button */}
                 <button 
