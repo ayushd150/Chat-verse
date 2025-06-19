@@ -20,7 +20,7 @@ const AUTH_CONFIG = {
     REFRESH_TOKEN: import.meta.env.VITE_REFRESH_TOKEN_ENDPOINT || "/auth/refresh",
     FORGOT_PASSWORD: import.meta.env.VITE_FORGOT_PASSWORD_ENDPOINT || "/auth/forgot-password",
     RESET_PASSWORD: import.meta.env.VITE_RESET_PASSWORD_ENDPOINT || "/auth/reset-password",
-    UPDATE_PROFILE: import.meta.env.VITE_UPDATE_PROFILE_ENDPOINT || "/auth/update-profile",
+    UPDATE_PROFILE: import.meta.env.VITE_UPDATE_PROFILE_ENDPOINT || "/profile/update-profile",
     STORAGE_INFO: import.meta.env.VITE_STORAGE_INFO_ENDPOINT || "/auth/storage-info",
     CLEAR_DATA: import.meta.env.VITE_CLEAR_DATA_ENDPOINT || "/auth/clear-data"
   },
