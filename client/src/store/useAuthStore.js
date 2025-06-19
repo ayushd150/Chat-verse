@@ -33,7 +33,7 @@ const AUTH_CONFIG = {
     reconnectionDelay: 1000,
     reconnectionAttempts: 5,
     timeout: 20000,
-    transports: ['websocket', 'polling'], // Add both transports
+    transports: ['websocket', 'polling'],
     upgrade: true,
     ...JSON.parse(import.meta.env.VITE_SOCKET_OPTIONS || "{}")
   },
@@ -139,7 +139,7 @@ export const useAuthStore = create((set, get) => ({
   rememberMe: getRememberMeStatus(),
   config: AUTH_CONFIG,
   socketReconnectAttempts: 0,
-  lastMessageTimestamp: null, // Track last message for unread detection
+  lastMessageTimestamp: null,
 
   updateConfig: (newConfig) => {
     Object.assign(AUTH_CONFIG, newConfig);
@@ -404,155 +404,107 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
-  // Enhanced updateProfile with better error handling and validation
-  // Enhanced updateProfile with improved error handling and validation
-// Enhanced updateProfile with improved error handling and validation
-updateProfile: async (data) => {
-  set({ isUpdatingProfile: true });
-  try {
-    console.log("🔄 Updating profile with data:", data);
+  // FIXED updateProfile function with better state management
+  updateProfile: async (data) => {
+    set({ isUpdatingProfile: true });
     
-    // Validate email format if email is being updated
-    if (data.email) {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(data.email)) {
-        throw new Error("Invalid email format");
+    try {
+      console.log("🔄 Starting profile update with data:", data);
+      
+      // Validate email format if email is being updated
+      if (data.email) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(data.email)) {
+          const error = new Error("Invalid email format");
+          set({ isUpdatingProfile: false });
+          return { success: false, error: error.message };
+        }
       }
-    }
-    
-    const res = await axiosInstance.put(AUTH_CONFIG.ENDPOINTS.UPDATE_PROFILE, data);
-    
-    console.log("✅ Backend response:", res.data);
-    
-    // Check if the response indicates success
-    if (res.data.success === false) {
-      // Server explicitly indicated failure
-      const errorMessage = res.data.message || AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_ERROR;
-      console.error("❌ Server indicated update failed:", res.data);
-      toast.error(errorMessage);
+      
+      const res = await axiosInstance.put(AUTH_CONFIG.ENDPOINTS.UPDATE_PROFILE, data);
+      console.log("📥 Backend response:", res.data);
+      
+      // Handle explicit failure response
+      if (res.data.success === false) {
+        const errorMessage = res.data.message || AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_ERROR;
+        console.error("❌ Backend indicated failure:", res.data);
+        set({ isUpdatingProfile: false });
+        return { success: false, error: errorMessage, details: res.data };
+      }
+      
+      // Check if we have user data to update the state
+      if (res.data.user || res.data.success !== false) {
+        const currentAuthUser = get().authUser;
+        
+        // Create updated user object - prioritize backend data, fallback to sent data
+        const updatedUser = {
+          ...currentAuthUser,
+          ...(res.data.user || {}),
+          // Ensure critical fields are updated
+          ...(data.email && { email: data.email }),
+          ...(data.fullName && { fullName: data.fullName }),
+          ...(data.profilePic && { profilePic: data.profilePic })
+        };
+        
+        console.log("🔄 Updating authUser state:");
+        console.log("📤 Original:", currentAuthUser);
+        console.log("📥 Updated:", updatedUser);
+        
+        // Force state update with new reference
+        set({ 
+          authUser: { ...updatedUser }, // Create new object reference to trigger re-renders
+          isUpdatingProfile: false 
+        });
+        
+        // Update stored user
+        setStoredUser(updatedUser, get().rememberMe);
+        
+        // Emit socket event if connected
+        if (get().socket?.connected) {
+          get().socket.emit('userUpdated', updatedUser);
+        }
+        
+        // Success toast
+        showToast("success", AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_SUCCESS);
+        
+        // Verify state update after a short delay
+        setTimeout(() => {
+          const finalState = get().authUser;
+          console.log("✅ Final state verification:", finalState);
+          if (data.email && finalState.email !== data.email) {
+            console.error("⚠️ State update failed - email mismatch");
+          }
+        }, 100);
+        
+        return {
+          success: true,
+          user: updatedUser,
+          message: "Profile updated successfully"
+        };
+      } else {
+        // No user data returned and no explicit success
+        console.error("❌ No user data in response and no success flag");
+        set({ isUpdatingProfile: false });
+        return {
+          success: false,
+          error: "No user data returned from server",
+          details: res.data
+        };
+      }
+      
+    } catch (error) {
+      console.error("❌ Profile update error:", error);
+      
+      const errorMessage = error.response?.data?.message || error.message || AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_ERROR;
       set({ isUpdatingProfile: false });
       
       return {
         success: false,
         error: errorMessage,
-        details: res.data
+        details: error.response?.data
       };
     }
-    
-    if (res.data.user) {
-      const updatedUser = res.data.user;
-      
-      console.log("📊 Data Comparison:");
-      console.log("📤 Sent:", data);
-      console.log("📥 Received:", updatedUser);
-      console.log("🔍 Current authUser before update:", get().authUser);
-      
-      // CRITICAL FIX: Force a complete state update
-      const currentAuthUser = get().authUser;
-      const newAuthUser = { 
-        ...currentAuthUser, 
-        ...updatedUser,
-        // Ensure email is properly updated
-        email: updatedUser.email || data.email || currentAuthUser.email,
-        fullName: updatedUser.fullName || data.fullName || currentAuthUser.fullName
-      };
-      
-      console.log("🔄 New authUser state:", newAuthUser);
-      
-      // Update the store with new user data
-      set({ authUser: newAuthUser, isUpdatingProfile: false });
-      setStoredUser(newAuthUser, get().rememberMe);
-      
-      // ADDITIONAL FIX: Force a re-render by updating the axios headers
-      const token = getStoredToken();
-      if (token) {
-        axiosInstance.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-      }
-      
-      // Check for explicit success indicator or assume success if we got user data
-      const isExplicitSuccess = res.data.success === true;
-      const hasUserData = !!res.data.user;
-      
-      if (isExplicitSuccess || hasUserData) {
-        console.log("✅ Profile updated successfully");
-        
-        // VERIFICATION: Log the final state to confirm update
-        setTimeout(() => {
-          const finalAuthUser = get().authUser;
-          console.log("🎯 Final authUser state after update:", finalAuthUser);
-          console.log("📧 Final email:", finalAuthUser?.email);
-        }, 100);
-        
-        toast.success(AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_SUCCESS);
-        
-        // If socket is connected, emit user update event
-        if (get().socket?.connected) {
-          get().socket.emit('userUpdated', newAuthUser);
-        }
-        
-        return {
-          success: true,
-          user: newAuthUser,
-          message: "Profile updated successfully"
-        };
-      } else {
-        // Ambiguous response - log for debugging but don't fail
-        console.warn("⚠️ Ambiguous server response:", res.data);
-        toast.success(AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_SUCCESS);
-        
-        return {
-          success: true,
-          user: newAuthUser,
-          message: "Profile updated (response unclear)",
-          warning: "Server response was ambiguous"
-        };
-      }
-    } else {
-      console.error("❌ No user data in response");
-      
-      // FALLBACK: If no user data returned, try to update locally
-      if (res.data.success === true && data) {
-        console.log("🔧 Applying local update as fallback");
-        const currentAuthUser = get().authUser;
-        const localUpdatedUser = { 
-          ...currentAuthUser, 
-          ...data 
-        };
-        
-        set({ authUser: localUpdatedUser, isUpdatingProfile: false });
-        setStoredUser(localUpdatedUser, get().rememberMe);
-        
-        toast.success(AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_SUCCESS);
-        
-        return {
-          success: true,
-          user: localUpdatedUser,
-          message: "Profile updated (local fallback)"
-        };
-      }
-      
-      throw new Error("No user data returned from server");
-    }
-  } catch (error) {
-    console.error("❌ Profile update error:", error);
-    console.error("❌ Error details:", {
-      message: error.message,
-      response: error.response?.data,
-      status: error.response?.status,
-      config: error.config
-    });
-    
-    const errorMessage = error.response?.data?.message || error.message || AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_ERROR;
-    toast.error(errorMessage);
-    set({ isUpdatingProfile: false });
-    
-    return {
-      success: false,
-      error: errorMessage,
-      details: error.response?.data
-    };
-  }
-},
+  },
 
   // Enhanced socket connection with better message handling
   connectSocket: () => {
@@ -586,16 +538,14 @@ updateProfile: async (data) => {
       // Request initial data
       setTimeout(() => {
         newSocket.emit("getOnlineUsers");
-        newSocket.emit("getUnreadMessages"); // Request unread messages
+        newSocket.emit("getUnreadMessages");
       }, 500);
     });
 
     newSocket.on("disconnect", (reason) => {
       console.log("❌ Socket disconnected:", reason);
       
-      // Handle different disconnect reasons
       if (reason === "io server disconnect") {
-        // Server initiated disconnect, try to reconnect
         setTimeout(() => {
           if (socketReconnectAttempts < 3) {
             console.log("🔄 Attempting to reconnect...");
@@ -639,8 +589,6 @@ updateProfile: async (data) => {
     newSocket.on("newMessage", (message) => {
       console.log("📨 New message received:", message);
       set({ lastMessageTimestamp: Date.now() });
-      
-      // You can emit this to other parts of your app
       window.dispatchEvent(new CustomEvent('newMessage', { detail: message }));
     });
 
@@ -654,7 +602,6 @@ updateProfile: async (data) => {
       window.dispatchEvent(new CustomEvent('unreadCount', { detail: count }));
     });
 
-    // Error handling
     newSocket.on("error", (error) => {
       console.error("🚨 Socket error:", error);
     });
@@ -672,7 +619,6 @@ updateProfile: async (data) => {
     set({ socket: null, onlineUsers: [], socketReconnectAttempts: 0 });
   },
 
-  // Method to manually refresh socket connection
   refreshSocket: () => {
     console.log("🔄 Refreshing socket connection...");
     get().disconnectSocket();
@@ -681,7 +627,6 @@ updateProfile: async (data) => {
     }, 1000);
   },
 
-  // Method to check socket status
   getSocketStatus: () => {
     const socket = get().socket;
     return {
