@@ -14,12 +14,21 @@ const Sidebar = () => {
     getUnreadCount 
   } = useChatStore();
   
-  const { onlineUsers, authUser } = useAuthStore();
+  const { onlineUsers, authUser, socket } = useAuthStore();
   const [showOnlineOnly, setShowOnlineOnly] = useState(false);
 
   useEffect(() => {
     getUsers();
   }, [getUsers]);
+
+  // Debug logging to help troubleshoot
+  useEffect(() => {
+    console.log("🔍 Sidebar Debug Info:");
+    console.log("📊 Online users:", onlineUsers);
+    console.log("👤 Auth user:", authUser?._id);
+    console.log("🔌 Socket connected:", socket?.connected);
+    console.log("👥 Total users:", users.length);
+  }, [onlineUsers, authUser, socket, users]);
 
   const filteredUsers = showOnlineOnly
     ? users.filter((user) => onlineUsers.includes(user._id))
@@ -51,11 +60,21 @@ const Sidebar = () => {
             ({onlineUsersCount} online)
           </span>
         </div>
+        
+        {/* Debug info - remove this in production */}
+        <div className="mt-2 text-xs text-gray-500 hidden lg:block">
+          Socket: {socket?.connected ? '✅' : '❌'} | 
+          Online IDs: [{onlineUsers.join(', ')}]
+        </div>
       </div>
 
       <div className="overflow-y-auto w-full py-3">
         {filteredUsers.map((user) => {
           const unreadCount = getUnreadCount(user._id);
+          const isOnline = onlineUsers.includes(user._id);
+          
+          // Debug logging for each user
+          console.log(`👤 User ${user.fullName} (${user._id}): ${isOnline ? 'Online' : 'Offline'}`);
           
           return (
             <button
@@ -70,13 +89,16 @@ const Sidebar = () => {
               <div className="relative mx-auto lg:mx-0">
                 <img
                   src={user.profilePic || "/avatar.jpg"}
-                  alt={user.name}
+                  alt={user.fullName || user.name || "User"}
                   className="size-12 object-cover rounded-full"
                 />
-                {onlineUsers.includes(user._id) && (
+                {/* Enhanced online indicator with better visibility */}
+                {isOnline && (
                   <span
                     className="absolute bottom-0 right-0 size-3 bg-green-500 
-                    rounded-full ring-2 ring-zinc-900"
+                    rounded-full ring-2 ring-white border border-gray-300
+                    shadow-sm"
+                    title="Online"
                   />
                 )}
               </div>
@@ -84,7 +106,7 @@ const Sidebar = () => {
               {/* User info - only visible on large screens */}
               <div className="hidden lg:block text-left min-w-0 flex-1">
                 <div className="flex items-center justify-between">
-                  <div className="font-medium truncate">{user.fullName}</div>
+                  <div className="font-medium truncate">{user.fullName || user.name}</div>
                   {unreadCount > 0 && (
                     <span className="bg-primary text-primary-content text-xs rounded-full px-2 py-1 min-w-[20px] text-center">
                       {unreadCount > 99 ? "99+" : unreadCount}
@@ -92,7 +114,7 @@ const Sidebar = () => {
                   )}
                 </div>
                 <div className="text-sm text-zinc-400">
-                  {onlineUsers.includes(user._id) ? "Online" : "Offline"}
+                  {isOnline ? "Online" : "Offline"}
                 </div>
               </div>
 

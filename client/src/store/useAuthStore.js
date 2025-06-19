@@ -507,108 +507,150 @@ export const useAuthStore = create((set, get) => ({
   },
 
   // Enhanced socket connection with better message handling
-  connectSocket: () => {
-    const { authUser, socket, socketReconnectAttempts } = get();
+  // FIXED: Enhanced socket connection method in useAuthStore.js
+// Replace your existing connectSocket method with this improved version
+
+connectSocket: () => {
+  const { authUser, socket, socketReconnectAttempts } = get();
+  
+  if (!authUser || socket?.connected || !AUTH_CONFIG.FEATURES.ENABLE_SOCKET) {
+    console.log("🚫 Socket connection skipped:", {
+      hasUser: !!authUser,
+      isConnected: socket?.connected,
+      socketEnabled: AUTH_CONFIG.FEATURES.ENABLE_SOCKET
+    });
+    return;
+  }
+
+  console.log("🔌 Connecting socket for user:", authUser._id);
+
+  const newSocket = io(AUTH_CONFIG.SOCKET_URL, {
+    ...AUTH_CONFIG.SOCKET_OPTIONS,
+    query: {
+      userId: authUser._id, // FIXED: Make sure userId is passed in query
+    },
+    auth: {
+      userId: authUser._id,
+      token: getStoredToken(),
+    },
+  });
+
+  // Connection events
+  newSocket.on("connect", () => {
+    console.log("✅ Socket connected successfully");
+    console.log("🆔 Socket ID:", newSocket.id);
+    set({ socketReconnectAttempts: 0 });
     
-    if (!authUser || socket?.connected || !AUTH_CONFIG.FEATURES.ENABLE_SOCKET) {
-      console.log("🚫 Socket connection skipped:", {
-        hasUser: !!authUser,
-        isConnected: socket?.connected,
-        socketEnabled: AUTH_CONFIG.FEATURES.ENABLE_SOCKET
-      });
-      return;
-    }
+    // FIXED: Request online users immediately after connection
+    setTimeout(() => {
+      console.log("📤 Requesting online users after connection...");
+      newSocket.emit("getOnlineUsers");
+      newSocket.emit("getUnreadMessages");
+    }, 200); // Reduced delay
+  });
 
-    console.log("🔌 Connecting socket for user:", authUser._id);
-
-    const newSocket = io(AUTH_CONFIG.SOCKET_URL, {
-      ...AUTH_CONFIG.SOCKET_OPTIONS,
-      auth: {
-        userId: authUser._id,
-        token: getStoredToken(),
-      },
-    });
-
-    // Connection events
-    newSocket.on("connect", () => {
-      console.log("✅ Socket connected successfully");
-      console.log("🆔 Socket ID:", newSocket.id);
-      set({ socketReconnectAttempts: 0 });
-      
-      // Request initial data
+  newSocket.on("disconnect", (reason) => {
+    console.log("❌ Socket disconnected:", reason);
+    
+    // FIXED: Clear online users when disconnected
+    set({ onlineUsers: [] });
+    
+    if (reason === "io server disconnect") {
       setTimeout(() => {
-        newSocket.emit("getOnlineUsers");
-        newSocket.emit("getUnreadMessages");
-      }, 500);
-    });
+        if (socketReconnectAttempts < 3) {
+          console.log("🔄 Attempting to reconnect...");
+          newSocket.connect();
+          set({ socketReconnectAttempts: socketReconnectAttempts + 1 });
+        }
+      }, 2000);
+    }
+  });
 
-    newSocket.on("disconnect", (reason) => {
-      console.log("❌ Socket disconnected:", reason);
-      
-      if (reason === "io server disconnect") {
-        setTimeout(() => {
-          if (socketReconnectAttempts < 3) {
-            console.log("🔄 Attempting to reconnect...");
-            newSocket.connect();
-            set({ socketReconnectAttempts: socketReconnectAttempts + 1 });
-          }
-        }, 2000);
-      }
-    });
+  newSocket.on("connect_error", (error) => {
+    console.error("❌ Socket connection error:", error);
+    // FIXED: Clear online users on connection error
+    set({ onlineUsers: [] });
+  });
 
-    newSocket.on("connect_error", (error) => {
-      console.error("❌ Socket connection error:", error);
-    });
+  newSocket.on("reconnect", (attemptNumber) => {
+    console.log("🔄 Socket reconnected after", attemptNumber, "attempts");
+    set({ socketReconnectAttempts: 0 });
+    
+    // FIXED: Request online users again after reconnection
+    setTimeout(() => {
+      newSocket.emit("getOnlineUsers");
+    }, 500);
+  });
 
-    newSocket.on("reconnect", (attemptNumber) => {
-      console.log("🔄 Socket reconnected after", attemptNumber, "attempts");
-      set({ socketReconnectAttempts: 0 });
-    });
+  // FIXED: Enhanced online users event handler
+  newSocket.on("getOnlineUsers", (userIds) => {
+    console.log("👥 Raw online users received:", userIds);
+    
+    // FIXED: Ensure userIds is always an array
+    const validUserIds = Array.isArray(userIds) ? userIds : [];
+    
+    // FIXED: Filter out current user from online list for display purposes
+    const otherOnlineUsers = validUserIds.filter(id => id !== authUser._id);
+    
+    console.log("👥 Processed online users (excluding self):", otherOnlineUsers);
+    console.log("👥 Total online users (including self):", validUserIds);
+    
+    // Store all online users (including self) for proper functionality
+    set({ onlineUsers: validUserIds });
+  });
 
-    // Online users events
-    newSocket.on("getOnlineUsers", (userIds) => {
-      console.log("👥 Online users updated:", userIds);
-      set({ onlineUsers: userIds });
-    });
+  // FIXED: Add individual user connection/disconnection handlers
+  newSocket.on("userConnected", (userId) => {
+    console.log("✅ User connected:", userId);
+    const currentOnlineUsers = get().onlineUsers;
+    if (!currentOnlineUsers.includes(userId)) {
+      const updatedUsers = [...currentOnlineUsers, userId];
+      console.log("👥 Updated online users after connection:", updatedUsers);
+      set({ onlineUsers: updatedUsers });
+    }
+  });
 
-    newSocket.on("userConnected", (userId) => {
-      console.log("✅ User connected:", userId);
-      const currentOnlineUsers = get().onlineUsers;
-      if (!currentOnlineUsers.includes(userId)) {
-        set({ onlineUsers: [...currentOnlineUsers, userId] });
-      }
-    });
+  newSocket.on("userDisconnected", (userId) => {
+    console.log("❌ User disconnected:", userId);
+    const currentOnlineUsers = get().onlineUsers;
+    const updatedUsers = currentOnlineUsers.filter(id => id !== userId);
+    console.log("👥 Updated online users after disconnection:", updatedUsers);
+    set({ onlineUsers: updatedUsers });
+  });
 
-    newSocket.on("userDisconnected", (userId) => {
-      console.log("❌ User disconnected:", userId);
-      const currentOnlineUsers = get().onlineUsers;
-      set({ onlineUsers: currentOnlineUsers.filter(id => id !== userId) });
-    });
+  // Message events for unread detection
+  newSocket.on("newMessage", (message) => {
+    console.log("📨 New message received:", message);
+    set({ lastMessageTimestamp: Date.now() });
+    window.dispatchEvent(new CustomEvent('newMessage', { detail: message }));
+  });
 
-    // Message events for unread detection
-    newSocket.on("newMessage", (message) => {
-      console.log("📨 New message received:", message);
-      set({ lastMessageTimestamp: Date.now() });
-      window.dispatchEvent(new CustomEvent('newMessage', { detail: message }));
-    });
+  newSocket.on("messageRead", (data) => {
+    console.log("👁️ Message marked as read:", data);
+    window.dispatchEvent(new CustomEvent('messageRead', { detail: data }));
+  });
 
-    newSocket.on("messageRead", (data) => {
-      console.log("👁️ Message marked as read:", data);
-      window.dispatchEvent(new CustomEvent('messageRead', { detail: data }));
-    });
+  newSocket.on("unreadCount", (count) => {
+    console.log("📬 Unread messages count:", count);
+    window.dispatchEvent(new CustomEvent('unreadCount', { detail: count }));
+  });
 
-    newSocket.on("unreadCount", (count) => {
-      console.log("📬 Unread messages count:", count);
-      window.dispatchEvent(new CustomEvent('unreadCount', { detail: count }));
-    });
+  newSocket.on("error", (error) => {
+    console.error("🚨 Socket error:", error);
+  });
 
-    newSocket.on("error", (error) => {
-      console.error("🚨 Socket error:", error);
-    });
-
-    newSocket.connect();
-    set({ socket: newSocket });
-  },
+  // FIXED: Force connection
+  newSocket.connect();
+  set({ socket: newSocket });
+  
+  // FIXED: Backup request for online users after a delay
+  setTimeout(() => {
+    if (newSocket.connected) {
+      console.log("🔄 Backup request for online users...");
+      newSocket.emit("getOnlineUsers");
+    }
+  }, 2000);
+},
 
   disconnectSocket: () => {
     const socket = get().socket;
