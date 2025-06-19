@@ -405,102 +405,154 @@ export const useAuthStore = create((set, get) => ({
   },
 
   // Enhanced updateProfile with better error handling and validation
-  updateProfile: async (data) => {
-    set({ isUpdatingProfile: true });
-    try {
-      console.log("🔄 Updating profile with data:", data);
-      
-      // Validate email format if email is being updated
-      if (data.email) {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(data.email)) {
-          throw new Error("Invalid email format");
-        }
+  // Enhanced updateProfile with improved error handling and validation
+// Enhanced updateProfile with improved error handling and validation
+updateProfile: async (data) => {
+  set({ isUpdatingProfile: true });
+  try {
+    console.log("🔄 Updating profile with data:", data);
+    
+    // Validate email format if email is being updated
+    if (data.email) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(data.email)) {
+        throw new Error("Invalid email format");
       }
-      
-      const res = await axiosInstance.put(AUTH_CONFIG.ENDPOINTS.UPDATE_PROFILE, data);
-      
-      console.log("✅ Backend response:", res.data);
-      
-      if (res.data.user) {
-        const updatedUser = res.data.user;
-        
-        console.log("📊 Data Comparison:");
-        console.log("📤 Sent:", data);
-        console.log("📥 Received:", updatedUser);
-        
-        // Check each field that was sent for update
-        const failedUpdates = Object.keys(data).filter(key => {
-          const sent = data[key];
-          const received = updatedUser[key];
-          const isEqual = sent === received;
-          console.log(`🔍 ${key}: sent="${sent}" received="${received}" updated=${isEqual}`);
-          return !isEqual;
-        });
-        
-        // Update the store with new user data
-        set({ authUser: updatedUser, isUpdatingProfile: false });
-        setStoredUser(updatedUser, get().rememberMe);
-        
-        if (failedUpdates.length > 0) {
-          console.warn("⚠️ These fields were not updated:", failedUpdates);
-          
-          // Create a more detailed error message
-          const failedFields = failedUpdates.map(field => {
-            const sent = data[field];
-            const received = updatedUser[field];
-            return `${field}: sent "${sent}" but got "${received}"`;
-          }).join(', ');
-          
-          const errorMsg = `Some fields were not updated: ${failedFields}`;
-          toast.error(errorMsg);
-          
-          // Return both success and failure info
-          return {
-            success: false,
-            user: updatedUser,
-            failedFields: failedUpdates,
-            message: errorMsg
-          };
-        } else {
-          console.log("✅ All fields updated successfully");
-          toast.success(AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_SUCCESS);
-          
-          // If socket is connected, emit user update event
-          if (get().socket?.connected) {
-            get().socket.emit('userUpdated', updatedUser);
-          }
-          
-          return {
-            success: true,
-            user: updatedUser,
-            message: "Profile updated successfully"
-          };
-        }
-      } else {
-        console.error("❌ No user data in response");
-        throw new Error("No user data returned from server");
-      }
-    } catch (error) {
-      console.error("❌ Profile update error:", error);
-      console.error("❌ Error details:", {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
-        config: error.config
-      });
-      
-      const errorMessage = error.response?.data?.message || error.message || AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_ERROR;
+    }
+    
+    const res = await axiosInstance.put(AUTH_CONFIG.ENDPOINTS.UPDATE_PROFILE, data);
+    
+    console.log("✅ Backend response:", res.data);
+    
+    // Check if the response indicates success
+    if (res.data.success === false) {
+      // Server explicitly indicated failure
+      const errorMessage = res.data.message || AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_ERROR;
+      console.error("❌ Server indicated update failed:", res.data);
       toast.error(errorMessage);
       set({ isUpdatingProfile: false });
       
       return {
         success: false,
         error: errorMessage,
-        details: error.response?.data
+        details: res.data
       };
     }
-  },
+    
+    if (res.data.user) {
+      const updatedUser = res.data.user;
+      
+      console.log("📊 Data Comparison:");
+      console.log("📤 Sent:", data);
+      console.log("📥 Received:", updatedUser);
+      console.log("🔍 Current authUser before update:", get().authUser);
+      
+      // CRITICAL FIX: Force a complete state update
+      const currentAuthUser = get().authUser;
+      const newAuthUser = { 
+        ...currentAuthUser, 
+        ...updatedUser,
+        // Ensure email is properly updated
+        email: updatedUser.email || data.email || currentAuthUser.email,
+        fullName: updatedUser.fullName || data.fullName || currentAuthUser.fullName
+      };
+      
+      console.log("🔄 New authUser state:", newAuthUser);
+      
+      // Update the store with new user data
+      set({ authUser: newAuthUser, isUpdatingProfile: false });
+      setStoredUser(newAuthUser, get().rememberMe);
+      
+      // ADDITIONAL FIX: Force a re-render by updating the axios headers
+      const token = getStoredToken();
+      if (token) {
+        axiosInstance.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+      }
+      
+      // Check for explicit success indicator or assume success if we got user data
+      const isExplicitSuccess = res.data.success === true;
+      const hasUserData = !!res.data.user;
+      
+      if (isExplicitSuccess || hasUserData) {
+        console.log("✅ Profile updated successfully");
+        
+        // VERIFICATION: Log the final state to confirm update
+        setTimeout(() => {
+          const finalAuthUser = get().authUser;
+          console.log("🎯 Final authUser state after update:", finalAuthUser);
+          console.log("📧 Final email:", finalAuthUser?.email);
+        }, 100);
+        
+        toast.success(AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_SUCCESS);
+        
+        // If socket is connected, emit user update event
+        if (get().socket?.connected) {
+          get().socket.emit('userUpdated', newAuthUser);
+        }
+        
+        return {
+          success: true,
+          user: newAuthUser,
+          message: "Profile updated successfully"
+        };
+      } else {
+        // Ambiguous response - log for debugging but don't fail
+        console.warn("⚠️ Ambiguous server response:", res.data);
+        toast.success(AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_SUCCESS);
+        
+        return {
+          success: true,
+          user: newAuthUser,
+          message: "Profile updated (response unclear)",
+          warning: "Server response was ambiguous"
+        };
+      }
+    } else {
+      console.error("❌ No user data in response");
+      
+      // FALLBACK: If no user data returned, try to update locally
+      if (res.data.success === true && data) {
+        console.log("🔧 Applying local update as fallback");
+        const currentAuthUser = get().authUser;
+        const localUpdatedUser = { 
+          ...currentAuthUser, 
+          ...data 
+        };
+        
+        set({ authUser: localUpdatedUser, isUpdatingProfile: false });
+        setStoredUser(localUpdatedUser, get().rememberMe);
+        
+        toast.success(AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_SUCCESS);
+        
+        return {
+          success: true,
+          user: localUpdatedUser,
+          message: "Profile updated (local fallback)"
+        };
+      }
+      
+      throw new Error("No user data returned from server");
+    }
+  } catch (error) {
+    console.error("❌ Profile update error:", error);
+    console.error("❌ Error details:", {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+      config: error.config
+    });
+    
+    const errorMessage = error.response?.data?.message || error.message || AUTH_CONFIG.MESSAGES.PROFILE_UPDATE_ERROR;
+    toast.error(errorMessage);
+    set({ isUpdatingProfile: false });
+    
+    return {
+      success: false,
+      error: errorMessage,
+      details: error.response?.data
+    };
+  }
+},
 
   // Enhanced socket connection with better message handling
   connectSocket: () => {

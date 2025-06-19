@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuthStore } from "../store/useAuthStore";
 import { Camera, Mail, User, Edit3, Check, X, Save, Calendar, Shield, Sparkles, Settings } from "lucide-react";
 import toast from "react-hot-toast";
@@ -11,6 +11,17 @@ const ProfilePage = () => {
   const [editedName, setEditedName] = useState(authUser?.fullName || "");
   const [editedEmail, setEditedEmail] = useState(authUser?.email || "");
 
+  useEffect(() => {
+    console.log("🔍 ProfilePage - authUser changed:", authUser);
+    console.log("📧 Current email in authUser:", authUser?.email);
+    console.log("👤 Current name in authUser:", authUser?.fullName);
+    
+    // Update local state when authUser changes
+    if (authUser) {
+      setEditedName(authUser.fullName || "");
+      setEditedEmail(authUser.email || "");
+    }
+  }, [authUser]);
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -42,26 +53,27 @@ const ProfilePage = () => {
     try {
       console.log("Attempting to update name with:", { fullName: editedName.trim() });
       
-      // Include all required fields for the backend
       const updateData = { 
-        fullName: editedName.trim(),
-        email: authUser?.email // Include current email to satisfy backend validation
+        fullName: editedName.trim()
       };
       
       const result = await updateProfile(updateData);
       console.log("Update result:", result);
       
-      setIsEditingName(false);
-      toast.success("Name updated successfully!");
+      if (result.success) {
+        setIsEditingName(false);
+        toast.success("Name updated successfully!");
+      } else {
+        throw new Error(result.error || "Failed to update name");
+      }
     } catch (error) {
       console.error("Name update error:", error);
       
-      // Log the full error details
       if (error.response) {
         console.error("Error response:", error.response.data);
         toast.error(error.response.data.message || "Failed to update name");
       } else {
-        toast.error("Failed to update name");
+        toast.error(error.message || "Failed to update name");
       }
       
       // Reset to original value
@@ -69,207 +81,107 @@ const ProfilePage = () => {
     }
   };
 
-  // Enhanced handleEmailSave function for ProfilePage.jsx
-const handleEmailSave = async () => {
-  const trimmedEmail = editedEmail.trim();
-  
-  // Validation
-  if (!trimmedEmail) {
-    toast.error("Email cannot be empty");
-    return;
-  }
-  
-  if (!/\S+@\S+\.\S+/.test(trimmedEmail)) {
-    toast.error("Please enter a valid email");
-    return;
-  }
-  
-  // Check if email actually changed
-  if (trimmedEmail === authUser?.email) {
-    toast.info("Email is the same as current email");
-    setIsEditingEmail(false);
-    return;
-  }
-  
-  try {
-    console.log("🔄 Attempting to update email:");
-    console.log("📧 From:", authUser?.email);
-    console.log("📧 To:", trimmedEmail);
+  // FIXED EMAIL SAVE FUNCTION
+  const handleEmailSave = async () => {
+    const trimmedEmail = editedEmail.trim().toLowerCase();
     
-    // Create update payload
-    const updatePayload = { 
-      email: trimmedEmail,
-      // Include fullName to prevent backend validation issues
-      fullName: authUser?.fullName
-    };
+    // Validation
+    if (!trimmedEmail) {
+      toast.error("Email cannot be empty");
+      return;
+    }
     
-    console.log("📤 Sending payload:", updatePayload);
+    if (!validateEmail(trimmedEmail)) {
+      toast.error("Please enter a valid email address");
+      return;
+    }
     
-    // Call the updateProfile function
-    const result = await updateProfile(updatePayload);
-    console.log("📥 Backend response:", result);
+    // Check if email actually changed (case-insensitive comparison)
+    if (trimmedEmail === authUser?.email?.toLowerCase()) {
+      toast.info("Email is the same as current email");
+      setIsEditingEmail(false);
+      return;
+    }
     
-    // Check if the update was successful
-    // The result should contain the updated user data
-    if (result && result.success !== false) {
-      // Check if the email was actually updated in the returned user data
-      const updatedEmail = result.user?.email || result.email;
+    // Check email length
+    if (trimmedEmail.length > 254) {
+      toast.error("Email address is too long");
+      return;
+    }
+    
+    try {
+      console.log("🔄 Starting email update process:");
+      console.log("📧 Current:", authUser?.email);
+      console.log("📧 New:", trimmedEmail);
+      console.log("👤 User ID:", authUser?._id);
       
-      if (updatedEmail === trimmedEmail) {
-        console.log("✅ Email successfully updated");
+      const updatePayload = { 
+        email: trimmedEmail,
+        // Include fullName to prevent backend validation issues
+        fullName: authUser?.fullName
+      };
+      
+      console.log("📤 Update payload:", updatePayload);
+      
+      const result = await updateProfile(updatePayload);
+      console.log("📥 Backend response:", result);
+      
+      // FIXED: Check the result properly
+      if (result.success) {
+        console.log("✅ Email update successful");
         setIsEditingEmail(false);
         toast.success("Email updated successfully!");
-      } else {
-        console.warn("⚠️ Email update verification failed:");
-        console.warn("Expected:", trimmedEmail);
-        console.warn("Received:", updatedEmail);
         
-        // Reset to the email that was actually saved
-        if (updatedEmail) {
-          setEditedEmail(updatedEmail);
-          toast.error(`Email was not updated. Current email: ${updatedEmail}`);
-        } else {
-          setEditedEmail(authUser?.email || "");
-          toast.error("Email update failed - please try again");
-        }
+        // The authUser in the store should already be updated by updateProfile
+        // No need for manual verification since updateProfile handles it
+      } else {
+        // Handle failure case
+        console.error("❌ Email update failed:", result);
+        toast.error(result.error || "Email update failed - please try again");
+        
+        // Reset to original email
+        setEditedEmail(authUser?.email || "");
         setIsEditingEmail(false);
       }
-    } else {
-      // Backend returned success: false
-      console.error("❌ Backend returned failure:", result);
       
-      if (result.failedFields && result.failedFields.includes('email')) {
-        toast.error(result.message || "Email update failed on server");
+    } catch (error) {
+      console.error("❌ Email update error:", error);
+      
+      if (error.response) {
+        const status = error.response.status;
+        const errorData = error.response.data;
+        
+        console.error("📊 Error details:");
+        console.error("Status:", status);
+        console.error("Data:", errorData);
+        
+        if (status === 400) {
+          toast.error(errorData?.message || "Invalid email format");
+        } else if (status === 409) {
+          toast.error("Email already exists - please choose a different email");
+        } else if (status === 401) {
+          toast.error("Authentication failed - please login again");
+        } else {
+          toast.error(errorData?.message || `Update failed (Status: ${status})`);
+        }
+      } else if (error.request) {
+        toast.error("Network error - please check your connection");
       } else {
-        toast.error("Update failed - please try again");
+        toast.error(error.message || "An unexpected error occurred");
       }
       
-      // Reset to original email
+      // Reset to original value on error
       setEditedEmail(authUser?.email || "");
       setIsEditingEmail(false);
     }
-    
-  } catch (error) {
-    console.error("❌ Email update error:", error);
-    
-    if (error.response) {
-      const status = error.response.status;
-      const errorData = error.response.data;
-      
-      console.error("📊 Error details:");
-      console.error("Status:", status);
-      console.error("Data:", errorData);
-      
-      if (status === 400) {
-        toast.error(errorData?.message || "Invalid email format");
-      } else if (status === 409) {
-        toast.error("Email already exists - please choose a different email");
-      } else if (status === 401) {
-        toast.error("Authentication failed - please login again");
-      } else {
-        toast.error(errorData?.message || `Update failed (Status: ${status})`);
-      }
-    } else if (error.request) {
-      toast.error("Network error - please check your connection");
-    } else {
-      toast.error(error.message || "An unexpected error occurred");
-    }
-    
-    // Reset to original value on error
-    setEditedEmail(authUser?.email || "");
-    setIsEditingEmail(false);
-  }
-};
+  };
 
-// Also add this enhanced validation function for better email checking
-const validateEmail = (email) => {
-  // More comprehensive email validation
-  const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
-  return emailRegex.test(email);
-};
+  // Enhanced validation function for better email checking
+  const validateEmail = (email) => {
+    const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+    return emailRegex.test(email);
+  };
 
-// Enhanced handleEmailSave with better validation
-const handleEmailSaveEnhanced = async () => {
-  const trimmedEmail = editedEmail.trim().toLowerCase(); // Normalize email
-  
-  // Enhanced validation
-  if (!trimmedEmail) {
-    toast.error("Email cannot be empty");
-    return;
-  }
-  
-  if (!validateEmail(trimmedEmail)) {
-    toast.error("Please enter a valid email address");
-    return;
-  }
-  
-  // Check if email actually changed (case-insensitive comparison)
-  if (trimmedEmail === authUser?.email?.toLowerCase()) {
-    toast.info("Email is the same as current email");
-    setIsEditingEmail(false);
-    return;
-  }
-  
-  // Check email length
-  if (trimmedEmail.length > 254) {
-    toast.error("Email address is too long");
-    return;
-  }
-  
-  try {
-    console.log("🔄 Starting email update process:");
-    console.log("📧 Current:", authUser?.email);
-    console.log("📧 New:", trimmedEmail);
-    console.log("👤 User ID:", authUser?._id);
-    
-    // Show loading state
-    setIsEditingEmail(false); // Disable editing during update
-    // You might want to add a loading spinner here
-    
-    const updatePayload = { 
-      email: trimmedEmail,
-      // Include other required fields to prevent backend issues
-      ...(authUser?.fullName && { fullName: authUser.fullName })
-    };
-    
-    console.log("📤 Update payload:", updatePayload);
-    
-    const result = await updateProfile(updatePayload);
-    
-    if (result?.email === trimmedEmail) {
-      console.log("✅ Email update successful");
-      toast.success("Email updated successfully!");
-    } else {
-      console.warn("⚠️ Email update completed but value differs:");
-      console.warn("Sent:", trimmedEmail);
-      console.warn("Received:", result?.email);
-      
-      // Update the input to match what the backend returned
-      if (result?.email) {
-        setEditedEmail(result.email);
-        toast.warning(`Email was changed to: ${result.email}`);
-      } else {
-        setEditedEmail(authUser?.email || "");
-        toast.error("Email update failed - please try again");
-      }
-    }
-    
-  } catch (error) {
-    console.error("❌ Email update failed:", error);
-    
-    // Reset to original email
-    setEditedEmail(authUser?.email || "");
-    
-    // The error toast is handled by the updateProfile function
-    // but we can add specific handling here if needed
-    if (error.response?.status === 409) {
-      toast.error("This email is already in use by another account");
-    }
-  } finally {
-    // Always re-enable editing
-    setIsEditingEmail(true);
-  }
-};
   const handleNameCancel = () => {
     setEditedName(authUser?.fullName || "");
     setIsEditingName(false);

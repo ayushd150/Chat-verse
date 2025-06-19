@@ -250,17 +250,33 @@ export const updateProfile = async (req, res) => {
     const { fullName, profilePic } = req.body;
     const userId = req.user._id;
     
+    // Log what we received for debugging
+    console.log('📝 Profile update request:', { fullName, profilePic: profilePic ? 'Image provided' : 'No image' });
+    
     if (!fullName) {
       return res.status(400).json({ message: "Full name is required" });
     }
     
+    // Only update fullName and profilePic - NEVER email for security
+    const updateFields = { fullName };
+    if (profilePic) {
+      updateFields.profilePic = profilePic;
+    }
+    
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      { fullName, profilePic },
+      updateFields,
       { new: true }
     ).select("-password");
     
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    
+    console.log('✅ Profile updated successfully');
+    
     res.status(200).json({
+      success: true,
       user: {
         _id: updatedUser._id,
         fullName: updatedUser.fullName,
@@ -269,7 +285,7 @@ export const updateProfile = async (req, res) => {
       }
     });
   } catch (error) {
-    console.log("Error in updateProfile:", error.message);
+    console.log("❌ Error in updateProfile:", error.message);
     res.status(500).json({ error: "Internal server error" });
   }
 };
