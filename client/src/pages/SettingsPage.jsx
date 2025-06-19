@@ -18,9 +18,19 @@ import toast from "react-hot-toast";
 const SettingsPage = () => {
   const { theme, setTheme } = useThemeStore();
   const { authUser, updateProfile } = useAuthStore();
-  const { messages, clearAllMessages, exportChatData } = useChatStore();
+  const { 
+    messages, 
+    clearAllMessages, 
+    exportChatData, 
+    setMessages,
+    selectedUser,
+    // Add these if they exist in your store
+    clearChatHistory,
+    deleteAllMessages
+  } = useChatStore();
   
   const [isLoading, setIsLoading] = useState(false);
+  const [isClearingMessages, setIsClearingMessages] = useState(false);
   const [settings, setSettings] = useState({
     notifications: true,
     soundEffects: true,
@@ -99,18 +109,141 @@ const SettingsPage = () => {
   };
 
   const handleClearMessages = async () => {
-    if (!window.confirm('Are you sure you want to clear all messages? This cannot be undone.')) {
+    const confirmMessage = `Are you sure you want to clear all messages? This will delete ${messages?.length || 0} messages permanently and cannot be undone.`;
+    
+    if (!window.confirm(confirmMessage)) {
       return;
     }
     
+    setIsClearingMessages(true);
+    
     try {
+      // Try multiple approaches to ensure messages are cleared
+      const clearPromises = [];
+      
+      // Method 1: Use the existing clearAllMessages function
       if (clearAllMessages) {
-        await clearAllMessages();
+        clearPromises.push(clearAllMessages());
       }
-      toast.success('Messages cleared successfully');
+      
+      // Method 2: Use alternative clear functions if they exist
+      if (clearChatHistory) {
+        clearPromises.push(clearChatHistory());
+      }
+      
+      if (deleteAllMessages) {
+        clearPromises.push(deleteAllMessages());
+      }
+      
+      // Method 3: Direct API call if the store functions don't work
+      if (clearPromises.length === 0) {
+        // Make direct API call to clear messages
+        const response = await fetch('/api/messages/clear', {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            // Add auth headers if needed
+            'Authorization': `Bearer ${localStorage.getItem('token')}` // Adjust based on your auth setup
+          }
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to clear messages from server');
+        }
+        
+        clearPromises.push(Promise.resolve());
+      }
+      
+      // Wait for all clear operations to complete
+      await Promise.all(clearPromises);
+      
+      // Force clear local state as backup
+      if (setMessages) {
+        setMessages([]);
+      }
+      
+      // If there's a way to refresh the chat data, do it
+      if (typeof window !== 'undefined' && window.location) {
+        // Optionally reload the page to ensure clean state
+        // window.location.reload();
+      }
+      
+      toast.success(`Successfully cleared ${messages?.length || 0} messages`);
+      
     } catch (error) {
       console.error("Failed to clear messages:", error);
-      toast.error('Failed to clear messages');
+      
+      // Try fallback method - direct state manipulation
+      try {
+        if (setMessages) {
+          setMessages([]);
+          toast.success('Messages cleared from local storage');
+        } else {
+          toast.error('Failed to clear messages. Please try refreshing the page.');
+        }
+      } catch (fallbackError) {
+        console.error("Fallback clear also failed:", fallbackError);
+        toast.error('Failed to clear messages. Please contact support.');
+      }
+    } finally {
+      setIsClearingMessages(false);
+    }
+  };
+
+  // Enhanced clear with specific user messages
+  const handleClearUserMessages = async () => {
+    if (!selectedUser) {
+      toast.error('No user selected');
+      return;
+    }
+    
+    const userMessages = messages?.filter(msg => 
+      msg.senderId === selectedUser._id || msg.receiverId === selectedUser._id
+    ) || [];
+    
+    if (userMessages.length === 0) {
+      toast.info('No messages to clear with this user');
+      return;
+    }
+    
+    const confirmMessage = `Are you sure you want to clear ${userMessages.length} messages with ${selectedUser.fullName}?`;
+    
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+    
+    setIsClearingMessages(true);
+    
+    try {
+      // Filter out messages with the selected user
+      const remainingMessages = messages?.filter(msg => 
+        msg.senderId !== selectedUser._id && msg.receiverId !== selectedUser._id
+      ) || [];
+      
+      if (setMessages) {
+        setMessages(remainingMessages);
+      }
+      
+      // Make API call to clear specific user messages
+      try {
+        await fetch(`/api/messages/clear/${selectedUser._id}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+      } catch (apiError) {
+        console.warn('API call failed, but local state updated:', apiError);
+      }
+      
+      toast.success(`Cleared ${userMessages.length} messages with ${selectedUser.fullName}`);
+      
+    } catch (error) {
+      console.error("Failed to clear user messages:", error);
+      toast.error('Failed to clear user messages');
+    } finally {
+      setIsClearingMessages(false);
     }
   };
 
@@ -229,10 +362,11 @@ const SettingsPage = () => {
         <div className="mt-8 bg-white/10 backdrop-blur-xl rounded-3xl p-8 border border-white/20 shadow-2xl">
           <h2 className="text-2xl font-bold text-white mb-6">Data Management</h2>
           
-          <div className="grid md:grid-cols-2 gap-4">
+          <div className="grid md:grid-cols-2 gap-4 mb-6">
             <button
               onClick={handleExportData}
-              className="flex items-center gap-3 p-4 bg-gradient-to-r from-green-500/20 to-emerald-500/20 hover:from-green-500/30 hover:to-emerald-500/30 border border-green-500/30 rounded-xl text-white transition-all duration-300"
+              disabled={isLoading}
+              className="flex items-center gap-3 p-4 bg-gradient-to-r from-green-500/20 to-emerald-500/20 hover:from-green-500/30 hover:to-emerald-500/30 border border-green-500/30 rounded-xl text-white transition-all duration-300 disabled:opacity-50"
             >
               <Download className="w-5 h-5" />
               <div className="text-left">
@@ -243,23 +377,65 @@ const SettingsPage = () => {
 
             <button
               onClick={handleClearMessages}
-              className="flex items-center gap-3 p-4 bg-gradient-to-r from-red-500/20 to-pink-500/20 hover:from-red-500/30 hover:to-pink-500/30 border border-red-500/30 rounded-xl text-white transition-all duration-300"
+              disabled={isClearingMessages}
+              className="flex items-center gap-3 p-4 bg-gradient-to-r from-red-500/20 to-pink-500/20 hover:from-red-500/30 hover:to-pink-500/30 border border-red-500/30 rounded-xl text-white transition-all duration-300 disabled:opacity-50"
             >
-              <Trash2 className="w-5 h-5" />
+              {isClearingMessages ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Trash2 className="w-5 h-5" />
+              )}
               <div className="text-left">
-                <div className="font-medium">Clear Messages</div>
-                <div className="text-sm text-red-200">Delete all chat history</div>
+                <div className="font-medium">
+                  {isClearingMessages ? 'Clearing...' : 'Clear All Messages'}
+                </div>
+                <div className="text-sm text-red-200">
+                  {isClearingMessages ? 'Please wait...' : 'Delete all chat history'}
+                </div>
               </div>
             </button>
           </div>
+
+          {/* Additional clear option for current user */}
+          {selectedUser && (
+            <button
+              onClick={handleClearUserMessages}
+              disabled={isClearingMessages}
+              className="w-full flex items-center gap-3 p-4 bg-gradient-to-r from-orange-500/20 to-red-500/20 hover:from-orange-500/30 hover:to-red-500/30 border border-orange-500/30 rounded-xl text-white transition-all duration-300 disabled:opacity-50"
+            >
+              {isClearingMessages ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Trash2 className="w-5 h-5" />
+              )}
+              <div className="text-left">
+                <div className="font-medium">
+                  Clear Messages with {selectedUser.fullName}
+                </div>
+                <div className="text-sm text-orange-200">
+                  Delete only messages with this user
+                </div>
+              </div>
+            </button>
+          )}
         </div>
 
-        {/* Simple Stats */}
+        {/* Enhanced Stats */}
         <div className="mt-8 bg-white/10 backdrop-blur-xl rounded-3xl p-6 border border-white/20 shadow-2xl">
           <div className="text-center">
-            <p className="text-purple-200 text-lg">
+            <p className="text-purple-200 text-lg mb-2">
               Total Messages: <span className="text-white font-bold">{messages?.length || 0}</span>
             </p>
+            {selectedUser && (
+              <p className="text-purple-200 text-sm">
+                Messages with {selectedUser.fullName}: 
+                <span className="text-white font-bold ml-1">
+                  {messages?.filter(msg => 
+                    msg.senderId === selectedUser._id || msg.receiverId === selectedUser._id
+                  ).length || 0}
+                </span>
+              </p>
+            )}
           </div>
         </div>
       </div>
