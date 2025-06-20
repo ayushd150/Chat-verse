@@ -18,10 +18,13 @@ const messageSchema = new mongoose.Schema(
     image: {
       type: String,
     },
+    // Track which users have deleted this message from their view
+    deletedBy: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    }],
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
 const Message = mongoose.model("Message", messageSchema);

@@ -20,13 +20,9 @@ const SettingsPage = () => {
   const { authUser, updateProfile } = useAuthStore();
   const { 
     messages, 
-    clearAllMessages, 
-    exportChatData, 
-    setMessages,
     selectedUser,
-    // Add these if they exist in your store
-    clearChatHistory,
-    deleteAllMessages
+    users,
+    getUsers
   } = useChatStore();
   
   const [isLoading, setIsLoading] = useState(false);
@@ -118,73 +114,52 @@ const SettingsPage = () => {
     setIsClearingMessages(true);
     
     try {
-      // Try multiple approaches to ensure messages are cleared
-      const clearPromises = [];
+      const messageCount = messages?.length || 0;
       
-      // Method 1: Use the existing clearAllMessages function
-      if (clearAllMessages) {
-        clearPromises.push(clearAllMessages());
-      }
-      
-      // Method 2: Use alternative clear functions if they exist
-      if (clearChatHistory) {
-        clearPromises.push(clearChatHistory());
-      }
-      
-      if (deleteAllMessages) {
-        clearPromises.push(deleteAllMessages());
-      }
-      
-      // Method 3: Direct API call if the store functions don't work
-      if (clearPromises.length === 0) {
-        // Make direct API call to clear messages
-        const response = await fetch('/api/messages/clear', {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-            // Add auth headers if needed
-            'Authorization': `Bearer ${localStorage.getItem('token')}` // Adjust based on your auth setup
-          }
-        });
+      // Try to clear from backend using your existing store methods or API
+      try {
+        const store = useChatStore.getState();
         
-        if (!response.ok) {
-          throw new Error('Failed to clear messages from server');
+        // Check if there are any clear methods in the store
+        if (typeof store.clearAllMessages === 'function') {
+          await store.clearAllMessages();
+        } else if (typeof store.clearMessages === 'function') {
+          await store.clearMessages();
+        } else {
+          const response = await fetch('/api/messages/clear-all', {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+              // 'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            },
+            credentials:'include',
+          });
+          
+          if (!response.ok) {
+            throw new Error('Failed to clear messages from server');
+          }
         }
         
-        clearPromises.push(Promise.resolve());
+        toast.success(`Successfully cleared ${messageCount} messages`);
+        
+        // Refresh users list and messages to reflect changes
+        if (getUsers) {
+          await getUsers();
+        }
+        
+        // If there's a way to refresh messages, do it
+        if (selectedUser && typeof store.getMessages === 'function') {
+          await store.getMessages(selectedUser._id);
+        }
+        
+      } catch (apiError) {
+        console.warn('Failed to clear messages from backend:', apiError);
+        toast.error('Failed to clear messages from server. Please try again or contact support.');
       }
-      
-      // Wait for all clear operations to complete
-      await Promise.all(clearPromises);
-      
-      // Force clear local state as backup
-      if (setMessages) {
-        setMessages([]);
-      }
-      
-      // If there's a way to refresh the chat data, do it
-      if (typeof window !== 'undefined' && window.location) {
-        // Optionally reload the page to ensure clean state
-        // window.location.reload();
-      }
-      
-      toast.success(`Successfully cleared ${messages?.length || 0} messages`);
       
     } catch (error) {
       console.error("Failed to clear messages:", error);
-      
-      // Try fallback method - direct state manipulation
-      try {
-        if (setMessages) {
-          setMessages([]);
-          toast.success('Messages cleared from local storage');
-        } else {
-          toast.error('Failed to clear messages. Please try refreshing the page.');
-        }
-      } catch (fallbackError) {
-        console.error("Fallback clear also failed:", fallbackError);
-        toast.error('Failed to clear messages. Please contact support.');
-      }
+      toast.error('Failed to clear messages. Please try again.');
     } finally {
       setIsClearingMessages(false);
     }
@@ -215,29 +190,38 @@ const SettingsPage = () => {
     setIsClearingMessages(true);
     
     try {
-      // Filter out messages with the selected user
-      const remainingMessages = messages?.filter(msg => 
-        msg.senderId !== selectedUser._id && msg.receiverId !== selectedUser._id
-      ) || [];
-      
-      if (setMessages) {
-        setMessages(remainingMessages);
-      }
-      
-      // Make API call to clear specific user messages
+      // Try to clear specific user messages from backend
       try {
-        await fetch(`/api/messages/clear/${selectedUser._id}`, {
+        const response = await fetch(`/api/messages/clear/${selectedUser._id}`, {
           method: 'DELETE',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
+            // 'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          },
+          credentials:'include',
         });
+        
+        if (!response.ok) {
+          throw new Error('Failed to clear user messages from server');
+        }
+        
+        toast.success(`Cleared ${userMessages.length} messages with ${selectedUser.fullName}`);
+        
+        // Refresh data
+        if (getUsers) {
+          await getUsers();
+        }
+        
+        // Refresh current conversation messages
+        const store = useChatStore.getState();
+        if (typeof store.getMessages === 'function') {
+          await store.getMessages(selectedUser._id);
+        }
+        
       } catch (apiError) {
-        console.warn('API call failed, but local state updated:', apiError);
+        console.warn('API call failed:', apiError);
+        toast.error('Failed to clear messages from server. Please try again.');
       }
-      
-      toast.success(`Cleared ${userMessages.length} messages with ${selectedUser.fullName}`);
       
     } catch (error) {
       console.error("Failed to clear user messages:", error);
@@ -246,6 +230,12 @@ const SettingsPage = () => {
       setIsClearingMessages(false);
     }
   };
+
+  // Define a smaller set of popular themes
+  const availableThemes = [
+    'light', 'dark', 'cupcake', 'bumblebee', 'emerald', 'corporate', 
+    'synthwave', 'retro', 'halloween', 'forest', 'lofi', 'dracula'
+  ];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 pt-20">
@@ -275,8 +265,8 @@ const SettingsPage = () => {
               <h2 className="text-2xl font-bold text-white">Theme</h2>
             </div>
 
-            <div className="grid grid-cols-4 gap-3">
-              {THEMES.slice(0, 8).map((t) => (
+            <div className="grid grid-cols-3 gap-3">
+              {availableThemes.map((t) => (
                 <button
                   key={t}
                   disabled={isLoading}
@@ -287,14 +277,42 @@ const SettingsPage = () => {
                       : "bg-white/5 hover:bg-white/10 border border-white/10"
                     }
                   `}
-                  onClick={() => setTheme(t)}
+                  onClick={() => {
+                    setTheme(t);
+                    // Apply theme to current document for immediate visual feedback
+                    document.documentElement.setAttribute('data-theme', t);
+                    document.body.className = `theme-${t}`;
+                    toast.success(`Theme changed to ${t}`);
+                  }}
                 >
-                  <div className="relative h-8 w-full rounded-lg overflow-hidden" data-theme={t}>
-                    <div className="absolute inset-0 grid grid-cols-2 gap-1 p-1">
-                      <div className="rounded bg-primary"></div>
-                      <div className="rounded bg-secondary"></div>
-                      <div className="rounded bg-accent"></div>
-                      <div className="rounded bg-neutral"></div>
+                  <div className="relative h-6 w-full rounded-lg overflow-hidden bg-gradient-to-r from-blue-500 to-purple-500">
+                    {/* Theme preview colors */}
+                    <div className="absolute inset-0 grid grid-cols-3 gap-0.5 p-0.5">
+                      <div className={`rounded ${
+                        t === 'dark' ? 'bg-gray-800' : 
+                        t === 'light' ? 'bg-white' :
+                        t === 'cupcake' ? 'bg-pink-200' :
+                        t === 'bumblebee' ? 'bg-yellow-300' :
+                        t === 'emerald' ? 'bg-emerald-500' :
+                        t === 'corporate' ? 'bg-blue-600' :
+                        t === 'synthwave' ? 'bg-purple-600' :
+                        t === 'retro' ? 'bg-orange-400' :
+                        t === 'halloween' ? 'bg-orange-600' :
+                        t === 'forest' ? 'bg-green-700' :
+                        t === 'lofi' ? 'bg-gray-400' :
+                        t === 'dracula' ? 'bg-purple-800' :
+                        'bg-blue-500'
+                      }`}></div>
+                      <div className={`rounded ${
+                        t === 'dark' ? 'bg-gray-600' : 
+                        t === 'light' ? 'bg-gray-100' :
+                        'bg-white/50'
+                      }`}></div>
+                      <div className={`rounded ${
+                        t === 'dark' ? 'bg-gray-400' : 
+                        t === 'light' ? 'bg-gray-300' :
+                        'bg-white/30'
+                      }`}></div>
                     </div>
                   </div>
                   <span className="text-xs font-medium text-white">
@@ -302,6 +320,12 @@ const SettingsPage = () => {
                   </span>
                 </button>
               ))}
+            </div>
+            
+            <div className="mt-4 p-3 bg-white/5 rounded-xl border border-white/10">
+              <p className="text-sm text-purple-200">
+                Current theme: <span className="text-white font-medium">{theme}</span>
+              </p>
             </div>
           </div>
 
