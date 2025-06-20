@@ -175,7 +175,7 @@ io.on("connection", async (socket) => {
       });
     });
 
-    // Handle message read status
+    // NEW: Handle message read status
     socket.on("messageRead", ({ senderId, receiverId, messageId, unreadCount = 0 }) => {
       const senderSocketId = getReceiverSocketId(senderId);
       if (senderSocketId) {
@@ -191,6 +191,21 @@ io.on("connection", async (socket) => {
         userId: senderId,
         unreadCount: 0
       });
+    });
+
+    // NEW: Handle bulk messages read (when user opens chat)
+    socket.on("messagesRead", ({ userId, readBy }) => {
+      console.log("📖 Messages read event:", { userId, readBy });
+      
+      // Notify the sender that their messages were read
+      const senderSocketId = getReceiverSocketId(userId);
+      if (senderSocketId) {
+        io.to(senderSocketId).emit("messagesRead", {
+          readBy: readBy,
+          userId: userId,
+          readAt: new Date()
+        });
+      }
     });
 
     // Handle chat opened (for moving chat to top and clearing unread count)

@@ -63,7 +63,9 @@ export const sendMessage = async (req, res) => {
       receiverId,
       text,
       image: imageUrl,
-      deletedBy: [] // Initialize as empty array
+      deletedBy: [], // Initialize as empty array
+      isRead: false,  // Add read status
+      readAt: null    // Add read timestamp
     })
 
     await newMessage.save();
@@ -78,6 +80,51 @@ export const sendMessage = async (req, res) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 }
+
+// NEW: Mark messages as read
+export const markMessagesAsRead = async (req, res) => {
+  try {
+    const { id: senderId } = req.params; // ID of the user who sent the messages
+    const receiverId = req.user._id; // Current user who is reading the messages
+    
+    // Update all unread messages from this sender to current user
+    const result = await Message.updateMany(
+      {
+        senderId: senderId,
+        receiverId: receiverId,
+        isRead: false,
+        deletedBy: { $ne: receiverId } // Don't update deleted messages
+      },
+      {
+        $set: {
+          isRead: true,
+          readAt: new Date()
+        }
+      }
+    );
+    
+    console.log(`Marked ${result.modifiedCount} messages as read from ${senderId} to ${receiverId}`);
+    
+    // Emit socket event to notify sender that messages were read
+    const senderSocketId = getReceiverSocketId(senderId);
+    if (senderSocketId) {
+      io.to(senderSocketId).emit("messagesRead", {
+        readBy: receiverId,
+        userId: senderId,
+        readAt: new Date(),
+        messageCount: result.modifiedCount
+      });
+    }
+    
+    res.status(200).json({ 
+      message: "Messages marked as read successfully",
+      modifiedCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.log("error in markMessagesAsRead", error.message);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
 
 export const clearAllMessages = async (req, res) => {
   try {

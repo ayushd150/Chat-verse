@@ -18,11 +18,20 @@ const messageSchema = new mongoose.Schema(
     image: {
       type: String,
     },
-    // Track which users have deleted this message from their view
-    deletedBy: [{
-      type: mongoose.Schema.Types.ObjectId,
+    deletedBy: {
+      type: [mongoose.Schema.Types.ObjectId],
       ref: "User",
-    }],
+      default: [],
+    },
+    // NEW: Add read status fields
+    isRead: {
+      type: Boolean,
+      default: false,
+    },
+    readAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );

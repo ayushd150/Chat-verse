@@ -2,8 +2,6 @@ import { generateToken } from "../lib/utils.js";
 import User from "../models/userModel.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-
-// Helper function to generate refresh token
 const generateRefreshToken = (userId) => {
   return jwt.sign(
     { userId }, 
@@ -61,9 +59,6 @@ export const signup = async (req, res) => {
     const refreshToken = generateRefreshToken(newUser._id);
     
     console.log('✅ Tokens generated successfully');
-
-    // Note: generateToken already sets the cookie, so we don't need to set it here
-
     const responseData = {
       _id: newUser._id,
       fullName: newUser.fullName,
@@ -244,48 +239,3 @@ export const checkAuth = (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 };
-
-// export const updateProfile = async (req, res) => {
-//   try {
-//     const { fullName, profilePic } = req.body;
-//     const userId = req.user._id;
-    
-//     // Log what we received for debugging
-//     console.log('📝 Profile update request:', { fullName, profilePic: profilePic ? 'Image provided' : 'No image' });
-    
-//     if (!fullName) {
-//       return res.status(400).json({ message: "Full name is required" });
-//     }
-    
-//     // Only update fullName and profilePic - NEVER email for security
-//     const updateFields = { fullName };
-//     if (profilePic) {
-//       updateFields.profilePic = profilePic;
-//     }
-    
-//     const updatedUser = await User.findByIdAndUpdate(
-//       userId,
-//       updateFields,
-//       { new: true }
-//     ).select("-password");
-    
-//     if (!updatedUser) {
-//       return res.status(404).json({ message: "User not found" });
-//     }
-    
-//     console.log('✅ Profile updated successfully');
-    
-//     res.status(200).json({
-//       success: true,
-//       user: {
-//         _id: updatedUser._id,
-//         fullName: updatedUser.fullName,
-//         email: updatedUser.email,
-//         profilePic: updatedUser.profilePic,
-//       }
-//     });
-//   } catch (error) {
-//     console.log("❌ Error in updateProfile:", error.message);
-//     res.status(500).json({ error: "Internal server error" });
-//   }
-// };
