@@ -36,7 +36,7 @@ export const getMessages = async (req, res) => {
           deletedBy: { $ne: myId } // Exclude messages deleted by current user
         }
       ]
-    });
+    }).sort({ createdAt: 1 }); // Sort by creation time ascending (oldest first)
         
     res.status(200).json(messages);
   } catch (error) {
@@ -47,33 +47,58 @@ export const getMessages = async (req, res) => {
 
 export const sendMessage = async (req, res) => {
   try {
-    const {text, image} = req.body;
+    const { text, image, location, messageType } = req.body; // Added location and messageType
     const { id: receiverId } = req.params;  
     const myId = req.user._id;
 
+    // Validate message type and required fields
+    if (messageType === 'location' && (!location || !location.latitude || !location.longitude)) {
+      return res.status(400).json({ message: "Location data is required for location messages" });
+    }
+
+    if (messageType === 'text' && !text && !image) {
+      return res.status(400).json({ message: "Text or image is required for text messages" });
+    }
+
     let imageUrl;
-    if(image) {
+    if (image) {
       const uploadResponse = await cloudinary.uploader.upload(image, {
         folder: "profile-pictures-chat-app",
       });
       imageUrl = uploadResponse.secure_url;
     }
-    const newMessage = new Message({
+
+    // Create message object with appropriate fields based on message type
+    const messageData = {
       senderId: myId,
       receiverId,
-      text,
-      image: imageUrl,
-      deletedBy: [], // Initialize as empty array
-      isRead: false,  // Add read status
-      readAt: null    // Add read timestamp
-    })
+      messageType: messageType || 'text',
+      deletedBy: [],
+      isRead: false,
+      readAt: null
+    };
 
+    // Add type-specific data
+    if (messageType === 'location') {
+      messageData.location = {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        address: location.address || null,
+        accuracy: location.accuracy || null
+      };
+    } else {
+      messageData.text = text;
+      messageData.image = imageUrl;
+    }
+
+    const newMessage = new Message(messageData);
     await newMessage.save();
     
     const receiverSocketId = getReceiverSocketId(receiverId);
-    if(receiverSocketId) {
+    if (receiverSocketId) {
       io.to(receiverSocketId).emit("newMessage", newMessage);
     }
+    
     res.status(201).json(newMessage);
   } catch (error) {
     console.log("error in sendMessage", error.message);
@@ -81,19 +106,18 @@ export const sendMessage = async (req, res) => {
   }
 }
 
-// NEW: Mark messages as read
+// Mark messages as read
 export const markMessagesAsRead = async (req, res) => {
   try {
-    const { id: senderId } = req.params; // ID of the user who sent the messages
-    const receiverId = req.user._id; // Current user who is reading the messages
+    const { id: senderId } = req.params;
+    const receiverId = req.user._id;
     
-    // Update all unread messages from this sender to current user
     const result = await Message.updateMany(
       {
         senderId: senderId,
         receiverId: receiverId,
         isRead: false,
-        deletedBy: { $ne: receiverId } // Don't update deleted messages
+        deletedBy: { $ne: receiverId }
       },
       {
         $set: {
@@ -105,7 +129,6 @@ export const markMessagesAsRead = async (req, res) => {
     
     console.log(`Marked ${result.modifiedCount} messages as read from ${senderId} to ${receiverId}`);
     
-    // Emit socket event to notify sender that messages were read
     const senderSocketId = getReceiverSocketId(senderId);
     if (senderSocketId) {
       io.to(senderSocketId).emit("messagesRead", {
@@ -130,25 +153,23 @@ export const clearAllMessages = async (req, res) => {
   try {
     const myId = req.user._id;
     
-    // Mark all messages as deleted for this user (add user ID to deletedBy array)
     const result = await Message.updateMany(
       {
         $or: [
           { senderId: myId },
           { receiverId: myId }
         ],
-        deletedBy: { $ne: myId } // Only update messages not already deleted by this user
+        deletedBy: { $ne: myId }
       },
       {
-        $addToSet: { deletedBy: myId } // Add user ID to deletedBy array
+        $addToSet: { deletedBy: myId }
       }
     );
     
     console.log(`Marked ${result.modifiedCount} messages as deleted for user ${myId}`);
     
-    // Clean up messages that are deleted by both users
     await Message.deleteMany({
-      $expr: { $eq: [{ $size: "$deletedBy" }, 2] } // Delete if both users deleted it
+      $expr: { $eq: [{ $size: "$deletedBy" }, 2] }
     });
     
     res.status(200).json({ 
@@ -166,7 +187,6 @@ export const clearUserMessages = async (req, res) => {
     const myId = req.user._id;
     const { id: otherUserId } = req.params;
     
-    // Mark messages between users as deleted for this user
     const result = await Message.updateMany(
       {
         $and: [
@@ -177,18 +197,17 @@ export const clearUserMessages = async (req, res) => {
             ]
           },
           {
-            deletedBy: { $ne: myId } // Only update messages not already deleted by this user
+            deletedBy: { $ne: myId }
           }
         ]
       },
       {
-        $addToSet: { deletedBy: myId } // Add user ID to deletedBy array
+        $addToSet: { deletedBy: myId }
       }
     );
     
     console.log(`Marked ${result.modifiedCount} messages as deleted between ${myId} and ${otherUserId}`);
     
-    // Clean up messages that are deleted by both users
     await Message.deleteMany({
       $and: [
         {
@@ -198,7 +217,7 @@ export const clearUserMessages = async (req, res) => {
           ]
         },
         {
-          $expr: { $eq: [{ $size: "$deletedBy" }, 2] } // Delete if both users deleted it
+          $expr: { $eq: [{ $size: "$deletedBy" }, 2] }
         }
       ]
     });

@@ -1,11 +1,14 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useChatStore } from "../store/useChatStore";
 import ChatHeader from "./ChatHeader";
 import MessageInput from "./MessageInput";
 import MessageSkeleton from "./skeletons/MessageSkeleton";
 import UnreadNotification from "./UnreadNotification";
 import { MessageReadStatus } from "./ReadStatusIcons";
+import LocationMessage from "./location/LocationMessage";
+import LiveLocationMessage from "./location/LiveLocationMessage";
 import { useAuthStore } from "../store/useAuthStore";
+import { useLocation } from "../hooks/useLocation";
 import { formatMessageTime } from "../lib/utils";
 
 const ChatContainer = () => {
@@ -14,19 +17,37 @@ const ChatContainer = () => {
     getMessages,
     isMessagesLoading,
     selectedUser,
-    subscribeToMessages,
+    sendMessage, // Add this from your chat store
+    initializeSocketListeners,
     unsubscribeFromMessages,
     markMessagesAsRead,
   } = useChatStore();
   const { authUser, typingUsers } = useAuthStore();
+  const { getCurrentLocation } = useLocation();
   const messageEndRef = useRef(null);
+  const [userLocation, setUserLocation] = useState(null);
+
+  // Get user's current location for distance calculations
+  useEffect(() => {
+    const getUserLocation = async () => {
+      try {
+        const location = await getCurrentLocation();
+        setUserLocation({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude
+        });
+      } catch (error) {
+        console.log('Could not get user location for distance calculations');
+      }
+    };
+    
+    getUserLocation();
+  }, [getCurrentLocation]);
 
   useEffect(() => {
     if (selectedUser?._id) {
       getMessages(selectedUser._id);
-      subscribeToMessages();
-      
-      // Mark messages as read when opening chat
+      initializeSocketListeners();
       markMessagesAsRead(selectedUser._id);
     }
 
@@ -36,7 +57,7 @@ const ChatContainer = () => {
   }, [
     selectedUser?._id,
     getMessages,
-    subscribeToMessages,
+    initializeSocketListeners,
     unsubscribeFromMessages,
     markMessagesAsRead
   ]);
@@ -47,12 +68,90 @@ const ChatContainer = () => {
     }
   }, [messages]);
 
-  // Mark messages as read when component is visible and user is selected
   useEffect(() => {
     if (selectedUser && !isMessagesLoading) {
       markMessagesAsRead(selectedUser._id);
     }
   }, [selectedUser, isMessagesLoading, markMessagesAsRead]);
+
+  // Handle sending messages from MessageInput
+  const handleSendMessage = async (messageData) => {
+    if (!selectedUser?._id) {
+      throw new Error('No user selected');
+    }
+
+    // Send message using chat store
+    await sendMessage({
+      receiverId: selectedUser._id,
+      ...messageData
+    });
+  };
+
+  // Render individual message
+  const renderMessage = (message) => {
+    const isOwn = message.senderId === authUser._id;
+    
+    // Check if message has location data
+    if (message.messageType === 'location' && message.location) {
+      // Use LiveLocationMessage for live locations, regular LocationMessage for static ones
+      if (message.location.isLive) {
+        return (
+          <LiveLocationMessage 
+            key={message._id}
+            location={message.location}
+            fromMe={isOwn}
+            messageTimestamp={new Date(message.createdAt).getTime()}
+          />
+        );
+      } else {
+        return (
+          <LocationMessage 
+            key={message._id}
+            location={message.location}
+            fromMe={isOwn}
+          />
+        );
+      }
+    }
+
+    // Regular text/image message
+    return (
+      <div
+        key={message._id}
+        className={`chat ${isOwn ? "chat-end" : "chat-start"}`}
+      >
+        <div className="chat-image avatar">
+          <div className="size-10 rounded-full border">
+            <img
+              src={
+                isOwn
+                  ? authUser.profilePic || "/avatar.jpg"
+                  : selectedUser.profilePic || "/avatar.jpg"
+              }
+              alt="profile pic"
+            />
+          </div>
+        </div>
+        <div className="chat-header mb-1">
+          <time className="text-xs opacity-50 ml-1">
+            {formatMessageTime(message.createdAt)}
+          </time>
+        </div>
+        <div className="chat-bubble flex flex-col">
+          {message.image && (
+            <img
+              src={message.image}
+              alt="Attachment"
+              className="sm:max-w-[200px] rounded-md mb-2"
+            />
+          )}
+          {message.text && <p>{message.text}</p>}
+          
+          <MessageReadStatus message={message} authUser={authUser} />
+        </div>
+      </div>
+    );
+  };
 
   if (isMessagesLoading)
     return (
@@ -60,18 +159,15 @@ const ChatContainer = () => {
         <UnreadNotification />
         <ChatHeader />
         <MessageSkeleton />
-        <MessageInput />
+        <MessageInput onSendMessage={handleSendMessage} />
       </div>
     );
 
-  // Check if selected user is typing
   const isSelectedUserTyping = typingUsers?.includes(selectedUser?._id);
 
   return (
     <div className="flex-1 flex flex-col overflow-auto">
-      {/* Unread notification banner */}
       <UnreadNotification />
-      
       <ChatHeader />
       
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -86,48 +182,9 @@ const ChatContainer = () => {
           </div>
         )}
         
-        {messages.map((message) => (
-          <div
-            key={message._id}
-            className={`chat ${
-              message.senderId === authUser._id ? "chat-end" : "chat-start"
-            }`}
-          >
-            <div className="chat-image avatar">
-              <div className="size-10 rounded-full border">
-                <img
-                  src={
-                    message.senderId === authUser._id
-                      ? authUser.profilePic || "/avatar.jpg"
-                      : selectedUser.profilePic || "/avatar.jpg"
-                  }
-                  alt="profile pic"
-                />
-              </div>
-            </div>
-            <div className="chat-header mb-1">
-              <time className="text-xs opacity-50 ml-1">
-                {formatMessageTime(message.createdAt)}
-              </time>
-            </div>
-            <div className="chat-bubble flex flex-col">
-              {message.image && (
-                <img
-                  src={message.image}
-                  alt="Attachment"
-                  className="sm:max-w-[200px] rounded-md mb-2"
-                />
-              )}
-              {message.text && <p>{message.text}</p>}
-              
-              {/* Add read status indicator */}
-              <MessageReadStatus message={message} authUser={authUser} />
-            </div>
-          </div>
-        ))}
+        {messages.map(renderMessage)}
       </div>
 
-      {/* Typing Indicator - Only show "typing..." */}
       {isSelectedUserTyping && (
         <div className="chat chat-start px-4 pb-2">
           <div className="chat-image avatar">
@@ -148,7 +205,7 @@ const ChatContainer = () => {
       )}
 
       <div ref={messageEndRef} />
-      <MessageInput />
+      <MessageInput onSendMessage={handleSendMessage} />
     </div>
   );
 };
