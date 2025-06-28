@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Image, MapPin, Loader, Clock, X } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { Send, Image, MapPin, Loader, Clock, X, Mic, MicOff, Trash2, Play, Pause } from 'lucide-react';
 
 const MessageInput = ({ onSendMessage }) => {
   const [text, setText] = useState('');
@@ -10,8 +9,25 @@ const MessageInput = ({ onSendMessage }) => {
   const [isLocationLoading, setIsLocationLoading] = useState(false);
   const [showLocationOptions, setShowLocationOptions] = useState(false);
   const [activeLiveLocation, setActiveLiveLocation] = useState(null);
+  
+  // Voice recording states
+  const [isRecording, setIsRecording] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [audioBlob, setAudioBlob] = useState(null);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [audioUrl, setAudioUrl] = useState(null);
+  const [isPlayingVoice, setIsPlayingVoice] = useState(false);
+  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
+
   const fileInputRef = useRef(null);
   const locationIntervalRef = useRef(null);
+  
+  // Voice recording refs
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const timerRef = useRef(null);
+  const audioRef = useRef(null);
+  const streamRef = useRef(null);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -19,15 +35,176 @@ const MessageInput = ({ onSendMessage }) => {
       if (locationIntervalRef.current) {
         clearInterval(locationIntervalRef.current);
       }
+      stopRecording();
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+      }
     };
-  }, []);
+  }, [audioUrl]);
+
+  // Timer effect for recording
+  useEffect(() => {
+    if (isRecording && !isPaused) {
+      timerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [isRecording, isPaused]);
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Voice recording functions
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 44100
+        } 
+      });
+      
+      streamRef.current = stream;
+      audioChunksRef.current = [];
+
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { 
+          type: 'audio/webm;codecs=opus' 
+        });
+        setAudioBlob(audioBlob);
+        
+        const url = URL.createObjectURL(audioBlob);
+        setAudioUrl(url);
+
+        // Stop all tracks
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+        }
+      };
+
+      mediaRecorder.start(1000);
+      setIsRecording(true);
+      setRecordingTime(0);
+      setShowVoiceRecorder(true);
+      
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      alert('Could not access microphone. Please check permissions.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    
+    setIsRecording(false);
+    setIsPaused(false);
+    
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+  };
+
+  const pauseRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.pause();
+      setIsPaused(true);
+    }
+  };
+
+  const resumeRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
+      mediaRecorderRef.current.resume();
+      setIsPaused(false);
+    }
+  };
+
+  const playVoicePreview = () => {
+    if (audioRef.current) {
+      if (isPlayingVoice) {
+        audioRef.current.pause();
+        setIsPlayingVoice(false);
+      } else {
+        audioRef.current.play();
+        setIsPlayingVoice(true);
+      }
+    }
+  };
+
+  const deleteVoiceRecording = () => {
+    setAudioBlob(null);
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+      setAudioUrl(null);
+    }
+    setRecordingTime(0);
+    setIsPlayingVoice(false);
+    setShowVoiceRecorder(false);
+  };
+
+  const sendVoiceMessage = async () => {
+    if (!audioBlob) return;
+
+    setIsLoading(true);
+    try {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const audioData = reader.result;
+        await onSendMessage({
+          messageType: 'voice',
+          audio: audioData,
+          duration: recordingTime,
+          mimeType: audioBlob.type
+        });
+        
+        // Cleanup
+        deleteVoiceRecording();
+      };
+      reader.readAsDataURL(audioBlob);
+    } catch (error) {
+      console.error('Error sending voice message:', error);
+      alert('Failed to send voice message');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) { // 5MB limit
-      toast.error('Image size should be less than 5MB');
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image size should be less than 5MB');
       return;
     }
 
@@ -91,7 +268,6 @@ const MessageInput = ({ onSendMessage }) => {
         duration
       };
 
-      // Get address
       const address = await getReverseGeocode(locationData.latitude, locationData.longitude);
       if (address) {
         locationData.address = address;
@@ -115,7 +291,7 @@ const MessageInput = ({ onSendMessage }) => {
     try {
       const position = await getCurrentLocation();
       await sendLocationUpdate(position, false);
-      toast.success('Location shared successfully!');
+      alert('Location shared successfully!');
     } catch (error) {
       let errorMessage = 'Failed to get location';
       
@@ -136,7 +312,7 @@ const MessageInput = ({ onSendMessage }) => {
         }
       }
       
-      toast.error(errorMessage);
+      alert(errorMessage);
     } finally {
       setIsLocationLoading(false);
       setShowLocationOptions(false);
@@ -148,7 +324,6 @@ const MessageInput = ({ onSendMessage }) => {
     setShowLocationOptions(false);
 
     try {
-      // Send initial location
       const position = await getCurrentLocation();
       await sendLocationUpdate(position, true, duration);
 
@@ -159,9 +334,8 @@ const MessageInput = ({ onSendMessage }) => {
         startTime: Date.now()
       });
 
-      toast.success(`Live location sharing started for ${duration} minutes`);
+      alert(`Live location sharing started for ${duration} minutes`);
 
-      // Set up interval for live updates (every 30 seconds)
       locationIntervalRef.current = setInterval(async () => {
         try {
           if (Date.now() >= endTime) {
@@ -173,17 +347,15 @@ const MessageInput = ({ onSendMessage }) => {
           await sendLocationUpdate(newPosition, true, duration);
         } catch (error) {
           console.error('Error updating live location:', error);
-          // Don't stop sharing on single update failure
         }
-      }, 30000); // Update every 30 seconds
+      }, 30000);
 
-      // Auto-stop after duration
       setTimeout(() => {
         stopLiveLocationSharing();
       }, duration * 60 * 1000);
 
     } catch (error) {
-      toast.error('Failed to start live location sharing');
+      alert('Failed to start live location sharing');
       console.error('Live location error:', error);
     } finally {
       setIsLocationLoading(false);
@@ -197,9 +369,8 @@ const MessageInput = ({ onSendMessage }) => {
     }
     
     setActiveLiveLocation(null);
-    toast.success('Live location sharing stopped');
+    alert('Live location sharing stopped');
     
-    // Send stop message to other users
     onSendMessage({
       messageType: 'location_stop',
       timestamp: Date.now()
@@ -239,7 +410,7 @@ const MessageInput = ({ onSendMessage }) => {
       removeImage();
     } catch (error) {
       console.error('Error sending message:', error);
-      toast.error('Failed to send message');
+      alert('Failed to send message');
     } finally {
       setIsLoading(false);
     }
@@ -265,6 +436,125 @@ const MessageInput = ({ onSendMessage }) => {
               <X className="w-4 h-4" />
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Voice Recorder Interface */}
+      {showVoiceRecorder && (
+        <div className="mb-4 p-4 bg-base-200 rounded-lg border">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="font-medium">Voice Message</h4>
+            <button
+              onClick={deleteVoiceRecording}
+              className="text-base-content/60 hover:text-base-content"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {!audioBlob ? (
+            // Recording Interface
+            <div className="text-center space-y-4">
+              <div className="text-2xl font-mono text-primary">
+                {formatTime(recordingTime)}
+              </div>
+
+              <div className="flex items-center justify-center gap-2">
+                {isRecording && (
+                  <>
+                    <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                    <span className="text-sm text-base-content/60">
+                      {isPaused ? 'Paused' : 'Recording...'}
+                    </span>
+                  </>
+                )}
+              </div>
+
+              <div className="flex items-center justify-center gap-4">
+                {!isRecording ? (
+                  <button
+                    onClick={startRecording}
+                    className="btn btn-primary btn-circle btn-lg"
+                  >
+                    <Mic className="w-6 h-6" />
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={isPaused ? resumeRecording : pauseRecording}
+                      className="btn btn-secondary btn-circle"
+                    >
+                      {isPaused ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+                    </button>
+                    
+                    <button
+                      onClick={stopRecording}
+                      className="btn btn-error btn-circle btn-lg"
+                    >
+                      <div className="w-4 h-4 bg-white rounded-sm"></div>
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <p className="text-sm text-base-content/60">
+                {!isRecording 
+                  ? 'Tap to start recording' 
+                  : 'Tap square to stop, mic to pause/resume'
+                }
+              </p>
+            </div>
+          ) : (
+            // Playback Interface
+            <div className="space-y-4">
+              <div className="text-center">
+                <div className="text-lg font-mono text-primary mb-2">
+                  {formatTime(recordingTime)}
+                </div>
+                
+                <audio
+                  ref={audioRef}
+                  src={audioUrl}
+                  onEnded={() => setIsPlayingVoice(false)}
+                  className="hidden"
+                />
+
+                <button
+                  onClick={playVoicePreview}
+                  className="btn btn-primary btn-circle btn-lg mb-4"
+                >
+                  {isPlayingVoice ? (
+                    <Pause className="w-5 h-5" />
+                  ) : (
+                    <Play className="w-5 h-5 ml-1" />
+                  )}
+                </button>
+              </div>
+
+              <div className="flex justify-center gap-3">
+                <button
+                  onClick={deleteVoiceRecording}
+                  className="btn btn-error btn-sm"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete
+                </button>
+                
+                <button
+                  onClick={sendVoiceMessage}
+                  className="btn btn-primary btn-sm"
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <Loader className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4 mr-2" />
+                  )}
+                  Send
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -350,7 +640,7 @@ const MessageInput = ({ onSendMessage }) => {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="flex items-end gap-2">
+      <div className="flex items-end gap-2">
         <div className="flex-1">
           <textarea
             value={text}
@@ -368,7 +658,6 @@ const MessageInput = ({ onSendMessage }) => {
           />
         </div>
 
-        {/* Action Buttons */}
         <div className="flex gap-2">
           {/* Image Upload */}
           <input
@@ -386,6 +675,17 @@ const MessageInput = ({ onSendMessage }) => {
             title="Attach Image"
           >
             <Image className="w-4 h-4" />
+          </button>
+
+          {/* Voice Recording */}
+          <button
+            type="button"
+            onClick={startRecording}
+            className="btn btn-ghost btn-sm"
+            disabled={isLoading || isRecording}
+            title="Record Voice Message"
+          >
+            <Mic className="w-4 h-4" />
           </button>
 
           {/* Location Share */}
@@ -411,6 +711,7 @@ const MessageInput = ({ onSendMessage }) => {
           {/* Send Message */}
           <button
             type="submit"
+            onClick={handleSubmit}
             className="btn btn-primary btn-sm"
             disabled={isLoading || (!text.trim() && !image)}
           >
@@ -421,7 +722,7 @@ const MessageInput = ({ onSendMessage }) => {
             )}
           </button>
         </div>
-      </form>
+      </div>
     </div>
   );
 };

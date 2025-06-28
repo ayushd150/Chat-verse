@@ -2,6 +2,8 @@ import Message from "../models/messageModel.js";
 import User from "../models/userModel.js";
 import cloudinary from "../lib/cloudinary.js";
 import { getReceiverSocketId, io } from "../lib/socket.js";
+import fs from 'fs';
+import path from 'path';
 
 export const getUsersForSidebar = async (req, res) => {
   try {
@@ -105,6 +107,81 @@ export const sendMessage = async (req, res) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 }
+
+// NEW: Send voice message
+export const sendVoiceMessage = async (req, res) => {
+  try {
+    const { id: receiverId } = req.params;
+    const senderId = req.user._id;
+    const { duration } = req.body; // Duration from frontend
+
+    if (!req.file) {
+      return res.status(400).json({ error: "No voice file uploaded" });
+    }
+
+    // Upload voice file to Cloudinary
+    const uploadResponse = await cloudinary.uploader.upload(req.file.path, {
+      folder: "chat-app-voice-messages",
+      resource_type: "video" // Use 'video' for audio files in Cloudinary
+    });
+
+    // Delete temporary file
+    fs.unlinkSync(req.file.path);
+
+    // Create voice message object
+    const voiceData = {
+      url: uploadResponse.secure_url,
+      duration: parseFloat(duration) || 0,
+      size: req.file.size,
+      filename: req.file.filename,
+      mimeType: req.file.mimetype
+    };
+
+    const newMessage = new Message({
+      senderId,
+      receiverId,
+      messageType: 'voice',
+      voice: voiceData
+    });
+
+    await newMessage.save();
+
+    // Populate sender info for response
+    await newMessage.populate('senderId', 'fullName profilePic');
+    await newMessage.populate('receiverId', 'fullName profilePic');
+
+    // Emit to receiver via socket
+    const receiverSocketId = getReceiverSocketId(receiverId);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("newMessage", newMessage);
+      
+      // Update chat list for receiver
+      io.to(receiverSocketId).emit("updateChatList", {
+        userId: senderId,
+        lastMessage: "🎤 Voice message",
+        timestamp: newMessage.createdAt,
+        unreadCount: 1
+      });
+    }
+
+    // Update sender's chat list
+    const senderSocketId = getReceiverSocketId(senderId);
+    if (senderSocketId) {
+      io.to(senderSocketId).emit("updateChatList", {
+        userId: receiverId,
+        lastMessage: "🎤 Voice message",
+        timestamp: newMessage.createdAt,
+        isSent: true
+      });
+    }
+
+    res.status(201).json(newMessage);
+
+  } catch (error) {
+    console.error("Error in sendVoiceMessage:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
 
 // Mark messages as read
 export const markMessagesAsRead = async (req, res) => {
