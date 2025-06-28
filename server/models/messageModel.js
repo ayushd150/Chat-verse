@@ -18,6 +18,24 @@ const messageSchema = new mongoose.Schema(
     image: {
       type: String,
     },
+    // NEW: Voice message support
+    voice: {
+      url: {
+        type: String, // File path or URL to the voice message
+      },
+      duration: {
+        type: Number, // Duration in seconds
+      },
+      size: {
+        type: Number, // File size in bytes
+      },
+      filename: {
+        type: String, // Original filename
+      },
+      mimeType: {
+        type: String, // audio/webm, audio/mp3, etc
+      }
+    },
     // Enhanced location support with live location features
     location: {
       latitude: {
@@ -55,7 +73,7 @@ const messageSchema = new mongoose.Schema(
     },
     messageType: {
       type: String,
-      enum: ['text', 'image', 'location', 'location_live', 'location_stop'],
+      enum: ['text', 'image', 'voice', 'location', 'location_live', 'location_stop'], // Added 'voice'
       default: 'text'
     },
     deletedBy: {
