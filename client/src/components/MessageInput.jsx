@@ -116,6 +116,8 @@ const MessageInput = ({ onSendMessage }) => {
       setRecordingTime(0);
       setShowVoiceRecorder(true);
       
+      console.log('🎤 Recording started');
+      
     } catch (error) {
       console.error('Error starting recording:', error);
       alert('Could not access microphone. Please check permissions.');
@@ -133,6 +135,8 @@ const MessageInput = ({ onSendMessage }) => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
     }
+    
+    console.log('🎤 Recording stopped');
   };
 
   const pauseRecording = () => {
@@ -173,27 +177,47 @@ const MessageInput = ({ onSendMessage }) => {
   };
 
   const sendVoiceMessage = async () => {
-    if (!audioBlob) return;
+    if (!audioBlob) {
+      console.error('❌ No audio blob to send');
+      return;
+    }
 
     setIsLoading(true);
+    console.log('🎤 Preparing to send voice message...');
+    console.log('🎤 Audio blob size:', audioBlob.size);
+    console.log('🎤 Audio blob type:', audioBlob.type);
+    console.log('🎤 Recording duration:', recordingTime);
+
     try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const audioData = reader.result;
-        await onSendMessage({
-          messageType: 'voice',
-          audio: audioData,
-          duration: recordingTime,
-          mimeType: audioBlob.type
-        });
-        
-        // Cleanup
-        deleteVoiceRecording();
-      };
-      reader.readAsDataURL(audioBlob);
+      // Create FormData for voice message
+      const formData = new FormData();
+      
+      // Create a proper file from the blob
+      const audioFile = new File([audioBlob], `voice-${Date.now()}.webm`, {
+        type: audioBlob.type || 'audio/webm;codecs=opus'
+      });
+      
+      formData.append('voice', audioFile);
+      formData.append('messageType', 'voice');
+      formData.append('duration', recordingTime.toString());
+      formData.append('mimeType', audioBlob.type || 'audio/webm;codecs=opus');
+      
+      console.log('🎤 FormData created with entries:');
+      for (let [key, value] of formData.entries()) {
+        console.log(`  ${key}:`, value);
+      }
+      
+      // Send FormData to parent component
+      await onSendMessage(formData);
+      
+      console.log('✅ Voice message sent successfully');
+      
+      // Cleanup after successful send
+      deleteVoiceRecording();
+      
     } catch (error) {
-      console.error('Error sending voice message:', error);
-      alert('Failed to send voice message');
+      console.error('❌ Error sending voice message:', error);
+      alert('Failed to send voice message: ' + (error.message || 'Unknown error'));
     } finally {
       setIsLoading(false);
     }
@@ -439,14 +463,17 @@ const MessageInput = ({ onSendMessage }) => {
         </div>
       )}
 
-      {/* Voice Recorder Interface */}
+      {/* Voice Recorder Interface - FIXED UI */}
       {showVoiceRecorder && (
-        <div className="mb-4 p-4 bg-base-200 rounded-lg border">
+        <div className="mb-4 p-4 bg-base-200 rounded-lg border shadow-lg">
           <div className="flex items-center justify-between mb-3">
-            <h4 className="font-medium">Voice Message</h4>
+            <h4 className="font-medium flex items-center gap-2">
+              <Mic className="w-4 h-4 text-primary" />
+              Voice Message
+            </h4>
             <button
               onClick={deleteVoiceRecording}
-              className="text-base-content/60 hover:text-base-content"
+              className="text-base-content/60 hover:text-base-content hover:bg-base-300 rounded-full p-1"
             >
               <X className="w-4 h-4" />
             </button>
@@ -455,16 +482,16 @@ const MessageInput = ({ onSendMessage }) => {
           {!audioBlob ? (
             // Recording Interface
             <div className="text-center space-y-4">
-              <div className="text-2xl font-mono text-primary">
+              <div className="text-3xl font-mono text-primary font-bold">
                 {formatTime(recordingTime)}
               </div>
 
-              <div className="flex items-center justify-center gap-2">
+              <div className="flex items-center justify-center gap-2 min-h-[24px]">
                 {isRecording && (
                   <>
                     <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-                    <span className="text-sm text-base-content/60">
-                      {isPaused ? 'Paused' : 'Recording...'}
+                    <span className="text-sm text-base-content/60 font-medium">
+                      {isPaused ? 'Recording Paused' : 'Recording...'}
                     </span>
                   </>
                 )}
@@ -474,7 +501,8 @@ const MessageInput = ({ onSendMessage }) => {
                 {!isRecording ? (
                   <button
                     onClick={startRecording}
-                    className="btn btn-primary btn-circle btn-lg"
+                    className="btn btn-primary btn-circle btn-lg hover:scale-105 transition-transform"
+                    title="Start Recording"
                   >
                     <Mic className="w-6 h-6" />
                   </button>
@@ -482,14 +510,16 @@ const MessageInput = ({ onSendMessage }) => {
                   <>
                     <button
                       onClick={isPaused ? resumeRecording : pauseRecording}
-                      className="btn btn-secondary btn-circle"
+                      className="btn btn-secondary btn-circle hover:scale-105 transition-transform"
+                      title={isPaused ? "Resume Recording" : "Pause Recording"}
                     >
                       {isPaused ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
                     </button>
                     
                     <button
                       onClick={stopRecording}
-                      className="btn btn-error btn-circle btn-lg"
+                      className="btn btn-error btn-circle btn-lg hover:scale-105 transition-transform"
+                      title="Stop Recording"
                     >
                       <div className="w-4 h-4 bg-white rounded-sm"></div>
                     </button>
@@ -499,16 +529,16 @@ const MessageInput = ({ onSendMessage }) => {
 
               <p className="text-sm text-base-content/60">
                 {!isRecording 
-                  ? 'Tap to start recording' 
-                  : 'Tap square to stop, mic to pause/resume'
+                  ? 'Tap the microphone to start recording' 
+                  : 'Tap square to stop • Tap mic to pause/resume'
                 }
               </p>
             </div>
           ) : (
-            // Playback Interface
+            // Playback Interface - FIXED
             <div className="space-y-4">
               <div className="text-center">
-                <div className="text-lg font-mono text-primary mb-2">
+                <div className="text-2xl font-mono text-primary mb-3 font-bold">
                   {formatTime(recordingTime)}
                 </div>
                 
@@ -521,20 +551,26 @@ const MessageInput = ({ onSendMessage }) => {
 
                 <button
                   onClick={playVoicePreview}
-                  className="btn btn-primary btn-circle btn-lg mb-4"
+                  className="btn btn-primary btn-circle btn-lg mb-4 hover:scale-105 transition-transform"
+                  title={isPlayingVoice ? "Pause Preview" : "Play Preview"}
                 >
                   {isPlayingVoice ? (
-                    <Pause className="w-5 h-5" />
+                    <Pause className="w-6 h-6" />
                   ) : (
-                    <Play className="w-5 h-5 ml-1" />
+                    <Play className="w-6 h-6 ml-1" />
                   )}
                 </button>
+                
+                <div className="text-sm text-base-content/60 mb-4">
+                  {isPlayingVoice ? 'Playing preview...' : 'Tap to preview your recording'}
+                </div>
               </div>
 
               <div className="flex justify-center gap-3">
                 <button
                   onClick={deleteVoiceRecording}
-                  className="btn btn-error btn-sm"
+                  className="btn btn-error btn-sm hover:scale-105 transition-transform"
+                  title="Delete Recording"
                 >
                   <Trash2 className="w-4 h-4 mr-2" />
                   Delete
@@ -542,15 +578,16 @@ const MessageInput = ({ onSendMessage }) => {
                 
                 <button
                   onClick={sendVoiceMessage}
-                  className="btn btn-primary btn-sm"
+                  className="btn btn-primary btn-sm hover:scale-105 transition-transform"
                   disabled={isLoading}
+                  title="Send Voice Message"
                 >
                   {isLoading ? (
                     <Loader className="w-4 h-4 mr-2 animate-spin" />
                   ) : (
                     <Send className="w-4 h-4 mr-2" />
                   )}
-                  Send
+                  {isLoading ? 'Sending...' : 'Send'}
                 </button>
               </div>
             </div>
@@ -564,11 +601,11 @@ const MessageInput = ({ onSendMessage }) => {
           <img
             src={imagePreview}
             alt="Preview"
-            className="max-w-32 max-h-32 rounded-lg object-cover"
+            className="max-w-32 max-h-32 rounded-lg object-cover border shadow-sm"
           />
           <button
             onClick={removeImage}
-            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600"
+            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600 shadow-md"
           >
             ×
           </button>
@@ -577,12 +614,15 @@ const MessageInput = ({ onSendMessage }) => {
 
       {/* Location Options Modal */}
       {showLocationOptions && (
-        <div className="mb-4 p-4 bg-base-200 rounded-lg border">
+        <div className="mb-4 p-4 bg-base-200 rounded-lg border shadow-lg">
           <div className="flex items-center justify-between mb-3">
-            <h4 className="font-medium">Share Location</h4>
+            <h4 className="font-medium flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-primary" />
+              Share Location
+            </h4>
             <button
               onClick={() => setShowLocationOptions(false)}
-              className="text-base-content/60 hover:text-base-content"
+              className="text-base-content/60 hover:text-base-content hover:bg-base-300 rounded-full p-1"
             >
               <X className="w-4 h-4" />
             </button>
@@ -591,7 +631,7 @@ const MessageInput = ({ onSendMessage }) => {
           <div className="space-y-2">
             <button
               onClick={handleLocationShare}
-              className="w-full p-3 text-left bg-base-300 hover:bg-base-200 rounded-lg transition-colors"
+              className="w-full p-3 text-left bg-base-300 hover:bg-base-100 rounded-lg transition-colors"
               disabled={isLocationLoading}
             >
               <div className="flex items-center gap-3">
@@ -605,7 +645,7 @@ const MessageInput = ({ onSendMessage }) => {
 
             <button
               onClick={() => startLiveLocationSharing(5)}
-              className="w-full p-3 text-left bg-base-300 hover:bg-base-200 rounded-lg transition-colors"
+              className="w-full p-3 text-left bg-base-300 hover:bg-base-100 rounded-lg transition-colors"
               disabled={isLocationLoading || activeLiveLocation}
             >
               <div className="flex items-center gap-3">
@@ -622,7 +662,7 @@ const MessageInput = ({ onSendMessage }) => {
 
             <button
               onClick={() => startLiveLocationSharing(10)}
-              className="w-full p-3 text-left bg-base-300 hover:bg-base-200 rounded-lg transition-colors"
+              className="w-full p-3 text-left bg-base-300 hover:bg-base-100 rounded-lg transition-colors"
               disabled={isLocationLoading || activeLiveLocation}
             >
               <div className="flex items-center gap-3">
@@ -640,13 +680,14 @@ const MessageInput = ({ onSendMessage }) => {
         </div>
       )}
 
+      {/* Main Input Area */}
       <div className="flex items-end gap-2">
         <div className="flex-1">
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="Type a message..."
-            className="textarea textarea-bordered w-full resize-none"
+            className="textarea textarea-bordered w-full resize-none focus:outline-none focus:ring-2 focus:ring-primary"
             maxLength={1000}
             rows={1}
             onKeyDown={(e) => {
@@ -670,19 +711,19 @@ const MessageInput = ({ onSendMessage }) => {
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="btn btn-ghost btn-sm"
+            className="btn btn-ghost btn-sm hover:bg-base-200"
             disabled={isLoading}
             title="Attach Image"
           >
             <Image className="w-4 h-4" />
           </button>
 
-          {/* Voice Recording */}
+          {/* Voice Recording - FIXED BUTTON */}
           <button
             type="button"
             onClick={startRecording}
-            className="btn btn-ghost btn-sm"
-            disabled={isLoading || isRecording}
+            className={`btn btn-ghost btn-sm hover:bg-base-200 ${isRecording ? 'text-red-500' : ''}`}
+            disabled={isLoading || isRecording || showVoiceRecorder}
             title="Record Voice Message"
           >
             <Mic className="w-4 h-4" />
@@ -692,7 +733,7 @@ const MessageInput = ({ onSendMessage }) => {
           <button
             type="button"
             onClick={() => setShowLocationOptions(true)}
-            className="btn btn-ghost btn-sm relative"
+            className="btn btn-ghost btn-sm relative hover:bg-base-200"
             disabled={isLocationLoading || isLoading}
             title="Share Location"
           >
@@ -712,7 +753,7 @@ const MessageInput = ({ onSendMessage }) => {
           <button
             type="submit"
             onClick={handleSubmit}
-            className="btn btn-primary btn-sm"
+            className="btn btn-primary btn-sm hover:scale-105 transition-transform"
             disabled={isLoading || (!text.trim() && !image)}
           >
             {isLoading ? (

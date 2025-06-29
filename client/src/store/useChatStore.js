@@ -40,27 +40,60 @@ export const useChatStore = create((set, get) => ({
       set({ isMessagesLoading: false });
     }
   },
+// Replace the sendMessage function in useChatStore with this:
 
-  sendMessage: async (messageData) => {
-    const { selectedUser, messages } = get();
-    if (!selectedUser) return;
+sendMessage: async (messageData) => {
+  const { selectedUser, messages } = get();
+  if (!selectedUser) return;
+  
+  try {
+    let response;
     
-    try {
-      const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, messageData);
-      set({ messages: [...messages, res.data] });
+    // Check if it's FormData (voice message) or regular data
+    if (messageData instanceof FormData) {
+      console.log("🎤 Sending voice message to /send-voice route");
       
-      // Emit socket event for real-time delivery
-      const socket = useAuthStore.getState().socket;
-      if (socket) {
-        socket.emit("messageSent", {
-          message: res.data,
-          receiverId: selectedUser._id
-        });
-      }
-    } catch (error) {
-      toast.error(error.response?.data?.message || "Failed to send message");
+      // For voice messages, use the dedicated voice route
+      response = await axiosInstance.post(
+        `/messages/send-voice/${selectedUser._id}`, 
+        messageData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+    } else {
+      console.log("💬 Sending regular message to /send route");
+      
+      // For regular messages (text/image), send as JSON
+      response = await axiosInstance.post(
+        `/messages/send/${selectedUser._id}`, 
+        messageData
+      );
     }
-  },
+    
+    console.log("✅ Message sent successfully:", response.data);
+    
+    // Add the new message to the messages array
+    
+    
+    // Emit socket event for real-time delivery
+    const socket = useAuthStore.getState().socket;
+    if (socket) {
+      socket.emit("messageSent", {
+        message: response.data,
+        receiverId: selectedUser._id
+      });
+    }
+    
+  } catch (error) {
+    console.error("❌ Error sending message:", error);
+    toast.error(error.response?.data?.message || "Failed to send message");
+    throw error; // Re-throw so MessageInput can handle it
+  }
+},
+  
 
   // NEW: Mark messages as read
   markMessagesAsRead: async (userId) => {
@@ -108,9 +141,7 @@ export const useChatStore = create((set, get) => ({
 
     // Listen for new messages
     socket.on("newMessage", (newMessage) => {
-      const { selectedUser, messages } = get();
-      console.log("📨 New message received:", newMessage);
-      
+      const { selectedUser, messages } = get();    
       // If this message is for the currently selected conversation, add it to messages
       if (selectedUser && 
           (newMessage.senderId === selectedUser._id || newMessage.receiverId === selectedUser._id)) {

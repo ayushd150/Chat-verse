@@ -7,6 +7,7 @@ import UnreadNotification from "./UnreadNotification";
 import { MessageReadStatus } from "./ReadStatusIcons";
 import LocationMessage from "./location/LocationMessage";
 import LiveLocationMessage from "./location/LiveLocationMessage";
+import VoicePlayer from "./VoicePlayer";
 import { useAuthStore } from "../store/useAuthStore";
 import { useLocation } from "../hooks/useLocation";
 import { formatMessageTime } from "../lib/utils";
@@ -74,22 +75,90 @@ const ChatContainer = () => {
     }
   }, [selectedUser, isMessagesLoading, markMessagesAsRead]);
 
-  // Handle sending messages from MessageInput
+  // FIXED: Handle sending messages from MessageInput with proper FormData handling
   const handleSendMessage = async (messageData) => {
     if (!selectedUser?._id) {
       throw new Error('No user selected');
     }
 
-    // Send message using chat store
-    await sendMessage({
-      receiverId: selectedUser._id,
-      ...messageData
-    });
+    console.log('📤 handleSendMessage called with:', messageData);
+    console.log('📤 messageData type:', typeof messageData);
+    console.log('📤 Is FormData?', messageData instanceof FormData);
+
+    try {
+      // Check if this is a voice message (FormData)
+      if (messageData instanceof FormData) {
+        console.log('🎤 Processing voice message...');
+        
+        // For voice messages, we need to send the FormData directly
+        // and add the receiverId to it
+        messageData.append('receiverId', selectedUser._id);
+        
+        // Log FormData contents
+        for (let pair of messageData.entries()) {
+          console.log('📤 FormData entry:', pair[0], pair[1]);
+        }
+        
+        // Send the FormData directly to your chat store
+        await sendMessage(messageData);
+        
+      } else {
+        console.log('💬 Processing regular message...');
+        
+        // For regular messages (text/image), send as object
+        await sendMessage({
+          receiverId: selectedUser._id,
+          ...messageData
+        });
+      }
+      
+      console.log('✅ Message sent successfully');
+      
+    } catch (error) {
+      console.error('❌ Error sending message:', error);
+      throw error;
+    }
   };
 
   // Render individual message
   const renderMessage = (message) => {
     const isOwn = message.senderId === authUser._id;
+
+    if (message.messageType === 'voice' && message.voice && message.voice.url) {
+      return (
+        <div
+          key={message._id}
+          className={`chat ${isOwn ? "chat-end" : "chat-start"}`}
+        >
+          <div className="chat-image avatar">
+            <div className="size-10 rounded-full border">
+              <img
+                src={
+                  isOwn
+                    ? authUser.profilePic || "/avatar.jpg"
+                    : selectedUser.profilePic || "/avatar.jpg"
+                }
+                alt="profile pic"
+              />
+            </div>
+          </div>
+          <div className="chat-header mb-1">
+            <time className="text-xs opacity-50 ml-1">
+              {formatMessageTime(message.createdAt)}
+            </time>
+          </div>
+          <div className="chat-bubble p-2">
+            <VoicePlayer 
+              audioUrl={message.voice.url}
+              duration={message.voice.duration}
+              isOwnMessage={isOwn}
+              messageTime={new Date(message.createdAt).getTime()}
+            />
+            <MessageReadStatus message={message} authUser={authUser} />
+          </div>
+        </div>
+      );
+    }
     
     // Check if message has location data
     if (message.messageType === 'location' && message.location) {

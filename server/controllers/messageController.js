@@ -109,24 +109,58 @@ export const sendMessage = async (req, res) => {
 }
 
 // NEW: Send voice message
+// Replace your current sendVoiceMessage function with this fixed version:
+
 export const sendVoiceMessage = async (req, res) => {
   try {
+    console.log('🎤 sendVoiceMessage called');
+    console.log('🎤 req.params:', req.params);
+    console.log('🎤 req.body:', req.body);
+    console.log('🎤 req.file:', req.file);
+    console.log('🎤 req.user:', req.user);
+
     const { id: receiverId } = req.params;
     const senderId = req.user._id;
     const { duration } = req.body; // Duration from frontend
+
+    // Validate required data
+    if (!senderId) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+
+    if (!receiverId) {
+      return res.status(400).json({ error: "Receiver ID is required" });
+    }
 
     if (!req.file) {
       return res.status(400).json({ error: "No voice file uploaded" });
     }
 
+    console.log('🎤 Starting Cloudinary upload...');
+    console.log('🎤 File path:', req.file.path);
+
+    // Check if file exists before uploading
+    if (!fs.existsSync(req.file.path)) {
+      return res.status(400).json({ error: "Uploaded file not found" });
+    }
+
     // Upload voice file to Cloudinary
     const uploadResponse = await cloudinary.uploader.upload(req.file.path, {
       folder: "chat-app-voice-messages",
-      resource_type: "video" // Use 'video' for audio files in Cloudinary
+      resource_type: "video", // Use 'video' for audio files in Cloudinary
+      timeout: 60000 // 60 second timeout
     });
 
-    // Delete temporary file
-    fs.unlinkSync(req.file.path);
+    console.log('🎤 Cloudinary upload successful:', uploadResponse.secure_url);
+
+    // Delete temporary file after successful upload
+    try {
+      fs.unlinkSync(req.file.path);
+      console.log('🎤 Temporary file deleted');
+    } catch (deleteError) {
+      console.error('🎤 Error deleting temp file:', deleteError);
+      // Don't fail the request if we can't delete the temp file
+    }
 
     // Create voice message object
     const voiceData = {
@@ -137,49 +171,91 @@ export const sendVoiceMessage = async (req, res) => {
       mimeType: req.file.mimetype
     };
 
+    console.log('🎤 Creating message with voiceData:', voiceData);
+
     const newMessage = new Message({
       senderId,
       receiverId,
       messageType: 'voice',
-      voice: voiceData
+      voice: voiceData,
+      deletedBy: [], // Add this field to match your schema
+      isRead: false, // Add this field to match your schema
+      readAt: null   // Add this field to match your schema
     });
 
     await newMessage.save();
+    console.log('🎤 Message saved to database');
 
     // Populate sender info for response
     await newMessage.populate('senderId', 'fullName profilePic');
     await newMessage.populate('receiverId', 'fullName profilePic');
 
+    console.log('🎤 Message populated, sending socket events');
+
     // Emit to receiver via socket
-    const receiverSocketId = getReceiverSocketId(receiverId);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("newMessage", newMessage);
-      
-      // Update chat list for receiver
-      io.to(receiverSocketId).emit("updateChatList", {
-        userId: senderId,
-        lastMessage: "🎤 Voice message",
-        timestamp: newMessage.createdAt,
-        unreadCount: 1
-      });
+    try {
+      const receiverSocketId = getReceiverSocketId(receiverId);
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit("newMessage", newMessage);
+        
+        // Update chat list for receiver
+        io.to(receiverSocketId).emit("updateChatList", {
+          userId: senderId,
+          lastMessage: "🎤 Voice message",
+          timestamp: newMessage.createdAt,
+          unreadCount: 1
+        });
+        console.log('🎤 Socket events sent to receiver');
+      }
+
+      // Update sender's chat list
+      const senderSocketId = getReceiverSocketId(senderId);
+      if (senderSocketId) {
+        io.to(senderSocketId).emit("updateChatList", {
+          userId: receiverId,
+          lastMessage: "🎤 Voice message",
+          timestamp: newMessage.createdAt,
+          isSent: true
+        });
+        console.log('🎤 Socket events sent to sender');
+      }
+    } catch (socketError) {
+      console.error('🎤 Socket error (non-fatal):', socketError);
+      // Don't fail the request if socket fails
     }
 
-    // Update sender's chat list
-    const senderSocketId = getReceiverSocketId(senderId);
-    if (senderSocketId) {
-      io.to(senderSocketId).emit("updateChatList", {
-        userId: receiverId,
-        lastMessage: "🎤 Voice message",
-        timestamp: newMessage.createdAt,
-        isSent: true
-      });
-    }
-
+    console.log('🎤 Sending success response');
+    
+    // Return success response - THIS WAS MISSING!
     res.status(201).json(newMessage);
 
   } catch (error) {
-    console.error("Error in sendVoiceMessage:", error);
-    res.status(500).json({ error: "Internal server error" });
+    console.error('🎤 sendVoiceMessage error:', error);
+    console.error('🎤 Error stack:', error.stack);
+
+    // Clean up temp file if it exists and there was an error
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+        console.log('🎤 Temp file cleaned up after error');
+      } catch (cleanupError) {
+        console.error('🎤 Error cleaning up temp file:', cleanupError);
+      }
+    }
+
+    // Return appropriate error response
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ error: "Invalid message data", details: error.message });
+    }
+    
+    if (error.message && error.message.includes('cloudinary')) {
+      return res.status(500).json({ error: "File upload failed", details: error.message });
+    }
+
+    res.status(500).json({ 
+      error: "Failed to send voice message", 
+      details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
   }
 };
 

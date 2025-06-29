@@ -155,33 +155,45 @@ const VoiceRecorder = ({ onSendVoice, onCancel }) => {
   };
 
   const sendVoiceMessage = async () => {
-  if (!audioBlob) return;
+    if (!audioBlob) return;
 
-  try {
-    // Create FormData for file upload
-    const formData = new FormData();
-    
-    // Convert blob to file
-    const audioFile = new File([audioBlob], `voice-${Date.now()}.webm`, {
-      type: audioBlob.type || 'audio/webm'
-    });
-    
-    // Append file and duration to FormData
-    formData.append('voice', audioFile);
-    formData.append('duration', recordingTime.toString());
+    try {
+      // Create FormData for file upload
+      const formData = new FormData();
+      
+      // Convert blob to file
+      const audioFile = new File([audioBlob], `voice-${Date.now()}.webm`, {
+        type: audioBlob.type || 'audio/webm'
+      });
+      
+      // Append file and duration to FormData
+      formData.append('voice', audioFile);
+      formData.append('duration', recordingTime.toString());
+      formData.append('messageType', 'voice');
 
-    // Call the parent component's onSendVoice function with FormData
-    onSendVoice(formData);
-    
-    // Cleanup
-    if (audioUrl) {
-      URL.revokeObjectURL(audioUrl);
+      console.log('🎤 VoiceRecorder sending FormData:', formData);
+      console.log('🎤 FormData entries:');
+      for (let pair of formData.entries()) {
+        console.log('  ', pair[0], pair[1]);
+      }
+
+      // Call the parent component's onSendVoice function with FormData
+      await onSendVoice(formData);
+      
+      // Cleanup and close modal
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+      }
+      
+      // Close the recorder modal
+      onCancel();
+      
+      toast.success('Voice message sent!');
+    } catch (error) {
+      console.error('Error sending voice message:', error);
+      toast.error('Failed to send voice message: ' + (error.message || 'Unknown error'));
     }
-  } catch (error) {
-    console.error('Error sending voice message:', error);
-    toast.error('Failed to send voice message');
-  }
-};
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
