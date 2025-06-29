@@ -48,37 +48,41 @@ sendMessage: async (messageData) => {
   
   try {
     let response;
-    
-    // Check if it's FormData (voice message) or regular data
+    let optimisticMessage;
     if (messageData instanceof FormData) {
-      console.log("🎤 Sending voice message to /send-voice route");
-      
-      // For voice messages, use the dedicated voice route
       response = await axiosInstance.post(
         `/messages/send-voice/${selectedUser._id}`, 
         messageData,
-        {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        }
+        { headers: { 'Content-Type': 'multipart/form-data' }}
       );
+      optimisticMessage = {
+        _id: `temp-${Date.now()}`,
+        senderId: useAuthStore.getState().authUser._id,
+        receiverId: selectedUser._id,
+        messageType: 'voice',
+        voice: {
+          url: URL.createObjectURL(messageData.get('voice')),
+          duration: messageData.get('duration') ? Number(messageData.get('duration')) : undefined,
+        },
+        createdAt: new Date().toISOString(),
+        isRead: false,
+      };
     } else {
-      console.log("💬 Sending regular message to /send route");
-      
-      // For regular messages (text/image), send as JSON
       response = await axiosInstance.post(
         `/messages/send/${selectedUser._id}`, 
         messageData
       );
+      optimisticMessage = {
+        _id: `temp-${Date.now()}`,
+        senderId: useAuthStore.getState().authUser._id,
+        receiverId: selectedUser._id,
+        ...messageData,
+        createdAt: new Date().toISOString(),
+        isRead: false,
+      };
     }
-    
+    set({ messages: [...messages, optimisticMessage] });
     console.log("✅ Message sent successfully:", response.data);
-    
-    // Add the new message to the messages array
-    
-    
-    // Emit socket event for real-time delivery
     const socket = useAuthStore.getState().socket;
     if (socket) {
       socket.emit("messageSent", {
@@ -86,7 +90,7 @@ sendMessage: async (messageData) => {
         receiverId: selectedUser._id
       });
     }
-    
+    return response.data;
   } catch (error) {
     console.error("❌ Error sending message:", error);
     toast.error(error.response?.data?.message || "Failed to send message");
@@ -141,23 +145,38 @@ sendMessage: async (messageData) => {
 
     // Listen for new messages
     socket.on("newMessage", (newMessage) => {
-      const { selectedUser, messages } = get();    
-      // If this message is for the currently selected conversation, add it to messages
-      if (selectedUser && 
-          (newMessage.senderId === selectedUser._id || newMessage.receiverId === selectedUser._id)) {
-        set({ messages: [...messages, newMessage] });
-        
-        // Auto-mark as read if chat is open and message is from other user
-        if (newMessage.senderId === selectedUser._id) {
-          setTimeout(() => {
-            get().markMessagesAsRead(selectedUser._id);
-          }, 1000); // Small delay to ensure message is displayed
-        }
-      } else {
-        // Add to unread messages for other users
-        get().addUnreadMessage(newMessage.senderId);
-      }
-    });
+  const { selectedUser, messages } = get();
+  // If this message is for the currently selected conversation, add it to messages
+  if (
+    selectedUser &&
+    (newMessage.senderId === selectedUser._id || newMessage.receiverId === selectedUser._id)
+  ) {
+    // Remove optimistic message (with temp- id and same type/content)
+    const filteredMessages = messages.filter(
+      msg =>
+        !(
+          msg._id.startsWith('temp-') &&
+          msg.messageType === newMessage.messageType &&
+          (
+            (msg.messageType === 'voice' && newMessage.messageType === 'voice') ||
+            (msg.messageType === 'location' && newMessage.messageType === 'location') ||
+            (msg.text && newMessage.text && msg.text === newMessage.text)
+          )
+        )
+    );
+    set({ messages: [...filteredMessages, newMessage] });
+
+    // Auto-mark as read if chat is open and message is from other user
+    if (newMessage.senderId === selectedUser._id) {
+      setTimeout(() => {
+        get().markMessagesAsRead(selectedUser._id);
+      }, 1000); // Small delay to ensure message is displayed
+    }
+  } else {
+    // Add to unread messages for other users
+    get().addUnreadMessage(newMessage.senderId);
+  }
+});
 
     // NEW: Listen for message read confirmations
     socket.on("messageRead", (data) => {

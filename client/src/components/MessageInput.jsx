@@ -632,53 +632,39 @@ const MessageInput = ({ onSendMessage }) => {
             <button
               onClick={handleLocationShare}
               className="w-full p-3 text-left bg-base-300 hover:bg-base-100 rounded-lg transition-colors"
-              disabled={isLocationLoading}
-            >
-              <div className="flex items-center gap-3">
-                <MapPin className="w-5 h-5 text-primary" />
-                <div>
-                  <div className="font-medium">Current Location</div>
-                  <div className="text-sm text-base-content/60">Share your current location once</div>
-                </div>
-              </div>
-            </button>
-
-            <button
-              onClick={() => startLiveLocationSharing(5)}
-              className="w-full p-3 text-left bg-base-300 hover:bg-base-100 rounded-lg transition-colors"
               disabled={isLocationLoading || activeLiveLocation}
             >
               <div className="flex items-center gap-3">
                 <div className="relative">
                   <Clock className="w-5 h-5 text-green-500" />
                   <div className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                </div>
-                <div>
-                  <div className="font-medium">Live Location - 5 minutes</div>
-                  <div className="text-sm text-base-content/60">Share real-time location for 5 minutes</div>
-                </div>
+               </div>
+               <div>
+                 <div className="font-medium">Live Location - 5 minutes</div>
+                 <div className="text-sm text-base-content/60">Share real-time location for 5 minutes</div>
               </div>
-            </button>
-
+            </div>
+           </button>
             <button
-              onClick={() => startLiveLocationSharing(10)}
-              className="w-full p-3 text-left bg-base-300 hover:bg-base-100 rounded-lg transition-colors"
-              disabled={isLocationLoading || activeLiveLocation}
-            >
-              <div className="flex items-center gap-3">
-                <div className="relative">
-                  <Clock className="w-5 h-5 text-orange-500" />
-                  <div className="absolute -top-1 -right-1 w-2 h-2 bg-orange-500 rounded-full animate-pulse"></div>
-                </div>
-                <div>
-                  <div className="font-medium">Live Location - 10 minutes</div>
-                  <div className="text-sm text-base-content/60">Share real-time location for 10 minutes</div>
-                </div>
-              </div>
-            </button>
+        onClick={() => startLiveLocationSharing(10)}
+        className="w-full p-3 text-left bg-base-300 hover:bg-base-100 rounded-lg transition-colors"
+        disabled={isLocationLoading || activeLiveLocation}
+      >
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Clock className="w-5 h-5 text-orange-500" />
+            <div className="absolute -top-1 -right-1 w-2 h-2 bg-orange-500 rounded-full animate-pulse"></div>
+          </div>
+          <div>
+            <div className="font-medium">Live Location - 10 minutes</div>
+            <div className="text-sm text-base-content/60">Share real-time location for 10 minutes</div>
           </div>
         </div>
-      )}
+      </button>
+    </div>
+  </div>
+)}
+        
 
       {/* Main Input Area */}
       <div className="flex items-end gap-2">
