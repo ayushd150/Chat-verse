@@ -9,17 +9,21 @@ const VoicePlayer = ({ audioUrl, duration, isOwnMessage = false, messageTime }) 
   
   const audioRef = useRef(null);
   const progressRef = useRef(null);
+  const handleEnded = () => {
+  setIsPlaying(false);
+  setCurrentTime(0);
+};
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
     const updateTime = () => setCurrentTime(audio.currentTime);
-    const updateDuration = () => setAudioDuration(audio.duration);
-    const handleEnded = () => {
-      setIsPlaying(false);
-      setCurrentTime(0);
-    };
+    const updateDuration = () => {
+  if (audio.duration && isFinite(audio.duration) && !isNaN(audio.duration)) {
+    setAudioDuration(audio.duration);
+  }
+};
     const handleLoadStart = () => setIsLoading(true);
     const handleCanPlay = () => setIsLoading(false);
 
@@ -39,11 +43,11 @@ const VoicePlayer = ({ audioUrl, duration, isOwnMessage = false, messageTime }) 
   }, [audioUrl]);
 
   const formatTime = (seconds) => {
-    if (isNaN(seconds)) return '0:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  if (!isFinite(seconds) || isNaN(seconds) || seconds < 0) return '0:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
 
   const togglePlayPause = () => {
     const audio = audioRef.current;
